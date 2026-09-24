@@ -2429,6 +2429,73 @@ def _wire_segments_from_content(content: str) -> list[tuple[float, float, float,
     ]
 
 
+def get_symbol_primitive_bounds(
+    library: str,
+    symbol_name: str,
+    sym_x: float,
+    sym_y: float,
+    rotation: int = 0,
+    unit: int = 1,
+) -> tuple[float, float, float, float] | None:
+    """Calculate exact symbol extents from library primitives (lines, rects, circles, arcs, pins)."""
+    sym_file = _symbol_library_file(library)
+    if sym_file is None:
+        return None
+
+    content = sym_file.read_text(encoding="utf-8", errors="ignore")
+    blocks = _collect_symbol_blocks(content, symbol_name)
+    if not blocks:
+        return None
+
+    xs: list[float] = []
+    ys: list[float] = []
+
+    for block in blocks:
+        block_name = _symbol_block_name(block)
+        if block_name is not None:
+            unit_prefixes = (f"{block_name}_{unit}_", f"{block_name}_0_")
+            child_blocks = _extract_child_symbol_blocks(block)
+            if child_blocks:
+                target_blocks = [
+                    cblock for cname, cblock in child_blocks
+                    if cname.startswith(unit_prefixes)
+                ]
+            else:
+                target_blocks = [block]
+        else:
+            target_blocks = [block]
+
+        for target in target_blocks:
+            for mx, my in re.findall(r"\(xy\s+([-\d.]+)\s+([-\d.]+)\)", target):
+                rx, ry = rotate_point(float(mx), -float(my), rotation)
+                xs.append(sym_x + rx)
+                ys.append(sym_y + ry)
+
+            for mx, my in re.findall(r"\((?:start|end|mid)\s+([-\d.]+)\s+([-\d.]+)\)", target):
+                rx, ry = rotate_point(float(mx), -float(my), rotation)
+                xs.append(sym_x + rx)
+                ys.append(sym_y + ry)
+
+            for cx_str, cy_str, r_str in re.findall(
+                r"\(circle\s+\(center\s+([-\d.]+)\s+([-\d.]+)\)\s+\(radius\s+([-\d.]+)\)", target
+            ):
+                rcx, rcy = rotate_point(float(cx_str), -float(cy_str), rotation)
+                r = float(r_str)
+                xs.extend([sym_x + rcx - r, sym_x + rcx + r])
+                ys.extend([sym_y + rcy - r, sym_y + rcy + r])
+
+            for mx, my, _ in re.findall(
+                r"\(pin\s+[a-z_]+\s+[a-z_]+\s+\(at\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\)", target
+            ):
+                rx, ry = rotate_point(float(mx), -float(my), rotation)
+                xs.append(sym_x + rx)
+                ys.append(sym_y + ry)
+
+    if not xs or not ys:
+        return None
+    return (round(min(xs), 4), round(min(ys), 4), round(max(xs), 4), round(max(ys), 4))
+
+
 def _get_symbol_bboxes(sexpr_content: str) -> list[BBox]:
     symbols: list[dict[str, Any]] = []
     cursor = 0
@@ -2442,7 +2509,24 @@ def _get_symbol_bboxes(sexpr_content: str) -> list[BBox]:
                 cursor += length
                 continue
         cursor += 1
-    return [BBox(*_symbol_bbox_bounds(symbol)) for symbol in symbols]
+    bboxes: list[BBox] = []
+    for symbol in symbols:
+        x = float(symbol.get("x", symbol.get("x_mm", 0.0)) or 0.0)
+        y = float(symbol.get("y", symbol.get("y_mm", 0.0)) or 0.0)
+        lib_id = str(symbol.get("lib_id", "") or "")
+        rotation = int(round(float(symbol.get("rotation", 0.0) or 0.0)))
+        unit = int(symbol.get("unit", 1) or 1)
+        bounds = None
+        if lib_id and ":" in lib_id:
+            try:
+                library, symbol_name = _split_lib_id(lib_id)
+                bounds = get_symbol_primitive_bounds(library, symbol_name, x, y, rotation, unit)
+            except Exception:
+                bounds = None
+        if bounds is None:
+            bounds = _symbol_bbox_bounds(symbol)
+        bboxes.append(BBox(*bounds))
+    return bboxes
 
 
 def _remove_wire_blocks(content: str) -> str:
@@ -3702,12 +3786,12 @@ def _segment_intersects_bbox(
 ) -> bool:
     x1, y1, x2, y2 = segment
     if abs(y1 - y2) <= SNAP_TOLERANCE_MM:
-        if bbox.y_min + SNAP_TOLERANCE_MM < y1 < bbox.y_max - SNAP_TOLERANCE_MM:
-            return max(min(x1, x2), bbox.x_min) <= min(max(x1, x2), bbox.x_max)
+        if bbox.y_min - SNAP_TOLERANCE_MM <= y1 <= bbox.y_max + SNAP_TOLERANCE_MM:
+            return max(min(x1, x2), bbox.x_min - SNAP_TOLERANCE_MM) <= min(max(x1, x2), bbox.x_max + SNAP_TOLERANCE_MM)
         return False
     if abs(x1 - x2) <= SNAP_TOLERANCE_MM:
-        if bbox.x_min + SNAP_TOLERANCE_MM < x1 < bbox.x_max - SNAP_TOLERANCE_MM:
-            return max(min(y1, y2), bbox.y_min) <= min(max(y1, y2), bbox.y_max)
+        if bbox.x_min - SNAP_TOLERANCE_MM <= x1 <= bbox.x_max + SNAP_TOLERANCE_MM:
+            return max(min(y1, y2), bbox.y_min - SNAP_TOLERANCE_MM) <= min(max(y1, y2), bbox.y_max + SNAP_TOLERANCE_MM)
         return False
     return False
 
@@ -3728,27 +3812,85 @@ def _route_avoiding_obstacles(
     end: tuple[float, float],
     obstacles: list[BBox],
     snap_to_grid: bool,
+    start_escape_dir: tuple[float, float] | None = None,
+    end_escape_dir: tuple[float, float] | None = None,
 ) -> tuple[list[tuple[float, float, float, float]], str | None]:
-    """Route L-shape first, then a simple padded Z-route around obstacles."""
+    """Route orthogonal wire segments avoiding obstacles using Escape-and-Route."""
     direct = _deduplicate_segments(_manhattan_segments(start, end, snap_to_grid))
-    padded = [obstacle.padded(5.0) for obstacle in obstacles]
-    if not direct or not _route_crosses_obstacle(direct, padded):
-        return direct, None
+
+    # Identify obstacles containing start and end points
+    start_owner: BBox | None = None
+    end_owner: BBox | None = None
+    intervening: list[BBox] = []
+    tol = SNAP_TOLERANCE_MM * 10
+    for obs in obstacles:
+        is_start = (obs.x_min - tol <= start[0] <= obs.x_max + tol and obs.y_min - tol <= start[1] <= obs.y_max + tol)
+        is_end = (obs.x_min - tol <= end[0] <= obs.x_max + tol and obs.y_min - tol <= end[1] <= obs.y_max + tol)
+        if is_start:
+            start_owner = obs
+        if is_end:
+            end_owner = obs
+        if not is_start and not is_end:
+            intervening.append(obs)
+
+    if not intervening or not _route_crosses_obstacle(direct, intervening):
+        start_ok = True
+        end_ok = True
+        if start_owner is not None and start_escape_dir is not None and direct:
+            first_seg = direct[0]
+            dx = first_seg[2] - first_seg[0]
+            dy = first_seg[3] - first_seg[1]
+            if (start_escape_dir[0] != 0 and dx * start_escape_dir[0] < 0) or (start_escape_dir[1] != 0 and dy * start_escape_dir[1] < 0):
+                start_ok = False
+        if start_ok and end_ok:
+            return direct, None
+
+    grid = SCHEMATIC_GRID_MM
+    start_esc = start
+    if start_escape_dir is not None:
+        start_esc = _snap_point(start[0] + start_escape_dir[0] * grid, start[1] + start_escape_dir[1] * grid, snap_to_grid)
+    elif start_owner is not None:
+        d_left = abs(start[0] - start_owner.x_min)
+        d_right = abs(start[0] - start_owner.x_max)
+        d_top = abs(start[1] - start_owner.y_min)
+        d_bot = abs(start[1] - start_owner.y_max)
+        min_d = min(d_left, d_right, d_top, d_bot)
+        dir_v = (0.0, -1.0) if min_d == d_top else (0.0, 1.0) if min_d == d_bot else (-1.0, 0.0) if min_d == d_left else (1.0, 0.0)
+        start_esc = _snap_point(start[0] + dir_v[0] * grid, start[1] + dir_v[1] * grid, snap_to_grid)
+
+    end_esc = end
+    if end_escape_dir is not None:
+        end_esc = _snap_point(end[0] + end_escape_dir[0] * grid, end[1] + end_escape_dir[1] * grid, snap_to_grid)
+    elif end_owner is not None:
+        d_left = abs(end[0] - end_owner.x_min)
+        d_right = abs(end[0] - end_owner.x_max)
+        d_top = abs(end[1] - end_owner.y_min)
+        d_bot = abs(end[1] - end_owner.y_max)
+        min_d = min(d_left, d_right, d_top, d_bot)
+        dir_v = (0.0, -1.0) if min_d == d_top else (0.0, 1.0) if min_d == d_bot else (-1.0, 0.0) if min_d == d_left else (1.0, 0.0)
+        end_esc = _snap_point(end[0] + dir_v[0] * grid, end[1] + dir_v[1] * grid, snap_to_grid)
 
     router = SchematicRouter(
-        grid_mm=SCHEMATIC_GRID_MM,
+        grid_mm=grid,
         obstacles=[
             RouterBBox(obstacle.x_min, obstacle.y_min, obstacle.x_max, obstacle.y_max)
-            for obstacle in padded
+            for obstacle in obstacles
         ],
+        max_steps=500,
     )
-    routed = router.route(start, end, max_bends=4)
-    if routed:
-        return _deduplicate_segments(routed), None
+    routed = router.route(start_esc, end_esc, max_bends=4)
+    if routed is not None:
+        full_segments = []
+        if start_esc != start:
+            full_segments.append((start[0], start[1], start_esc[0], start_esc[1]))
+        full_segments.extend(routed)
+        if end_esc != end:
+            full_segments.append((end_esc[0], end_esc[1], end[0], end[1]))
+        return _deduplicate_segments(full_segments), None
 
-    max_y = max(max(start[1], end[1]), *(bbox.y_max for bbox in padded))
-    min_y = min(min(start[1], end[1]), *(bbox.y_min for bbox in padded))
-    candidate_offsets = [max_y + SCHEMATIC_GRID_MM, min_y - SCHEMATIC_GRID_MM]
+    max_y = max(max(start[1], end[1]), *(bbox.y_max for bbox in obstacles))
+    min_y = min(min(start[1], end[1]), *(bbox.y_min for bbox in obstacles))
+    candidate_offsets = [max_y + grid, min_y - grid]
     for via_y in candidate_offsets:
         raw = [
             (start[0], start[1], start[0], via_y),
@@ -3756,7 +3898,7 @@ def _route_avoiding_obstacles(
             (end[0], via_y, end[0], end[1]),
         ]
         segments = _deduplicate_segments(raw)
-        if segments and not _route_crosses_obstacle(segments, padded):
+        if segments and not _route_crosses_obstacle(segments, obstacles):
             return segments, None
     return direct, "WARNING: obstacle_bypass_failed"
 
