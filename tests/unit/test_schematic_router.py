@@ -52,3 +52,9 @@ def test_route_avoiding_obstacles_escape_and_route() -> None:
     # Wire must detour cleanly over or under C1 without cutting through C1:
     assert any(s[1] < 57.15 or s[1] > 64.77 for s in segments)
 
+
+def test_schematic_router_returns_no_segments_when_start_equals_end() -> None:
+    """A zero-length route yields no geometry rather than a degenerate segment."""
+    router = SchematicRouter(grid_mm=2.54)
+
+    assert router.route((5.08, 5.08), (5.08, 5.08)) == []

@@ -2437,7 +2437,11 @@ def get_symbol_primitive_bounds(
     rotation: int = 0,
     unit: int = 1,
 ) -> tuple[float, float, float, float] | None:
-    """Calculate exact symbol extents from library primitives (lines, rects, circles, arcs, pins)."""
+    """Extent of a placed symbol from its library primitives.
+
+    Covers polylines, rectangles, circles, arcs and pins, so plates, optical
+    arrows and enclosing circles are all inside the box rather than clipped.
+    """
     sym_file = _symbol_library_file(library)
     if sym_file is None:
         return None
@@ -2452,17 +2456,15 @@ def get_symbol_primitive_bounds(
 
     for block in blocks:
         block_name = _symbol_block_name(block)
-        if block_name is not None:
-            unit_prefixes = (f"{block_name}_{unit}_", f"{block_name}_0_")
-            child_blocks = _extract_child_symbol_blocks(block)
-            if child_blocks:
-                target_blocks = [
-                    cblock for cname, cblock in child_blocks
-                    if cname.startswith(unit_prefixes)
-                ]
-            else:
-                target_blocks = [block]
-        else:
+        child_blocks = _extract_child_symbol_blocks(block) if block_name is not None else []
+        unit_prefixes = (f"{block_name}_{unit}_", f"{block_name}_0_")
+        target_blocks = [
+            cblock for cname, cblock in child_blocks if cname.startswith(unit_prefixes)
+        ]
+        if not target_blocks:
+            # Symbols that carry their primitives inline -- flattened ``extends``
+            # chains and imported parts -- have no matching unit children, so the
+            # root block is parsed as-is.
             target_blocks = [block]
 
         for target in target_blocks:
@@ -2518,11 +2520,8 @@ def _get_symbol_bboxes(sexpr_content: str) -> list[BBox]:
         unit = int(symbol.get("unit", 1) or 1)
         bounds = None
         if lib_id and ":" in lib_id:
-            try:
-                library, symbol_name = _split_lib_id(lib_id)
-                bounds = get_symbol_primitive_bounds(library, symbol_name, x, y, rotation, unit)
-            except Exception:
-                bounds = None
+            library, symbol_name = _split_lib_id(lib_id)
+            bounds = get_symbol_primitive_bounds(library, symbol_name, x, y, rotation, unit)
         if bounds is None:
             bounds = _symbol_bbox_bounds(symbol)
         bboxes.append(BBox(*bounds))
@@ -3787,11 +3786,15 @@ def _segment_intersects_bbox(
     x1, y1, x2, y2 = segment
     if abs(y1 - y2) <= SNAP_TOLERANCE_MM:
         if bbox.y_min - SNAP_TOLERANCE_MM <= y1 <= bbox.y_max + SNAP_TOLERANCE_MM:
-            return max(min(x1, x2), bbox.x_min - SNAP_TOLERANCE_MM) <= min(max(x1, x2), bbox.x_max + SNAP_TOLERANCE_MM)
+            return max(min(x1, x2), bbox.x_min - SNAP_TOLERANCE_MM) <= min(
+                max(x1, x2), bbox.x_max + SNAP_TOLERANCE_MM
+            )
         return False
     if abs(x1 - x2) <= SNAP_TOLERANCE_MM:
         if bbox.x_min - SNAP_TOLERANCE_MM <= x1 <= bbox.x_max + SNAP_TOLERANCE_MM:
-            return max(min(y1, y2), bbox.y_min - SNAP_TOLERANCE_MM) <= min(max(y1, y2), bbox.y_max + SNAP_TOLERANCE_MM)
+            return max(min(y1, y2), bbox.y_min - SNAP_TOLERANCE_MM) <= min(
+                max(y1, y2), bbox.y_max + SNAP_TOLERANCE_MM
+            )
         return False
     return False
 
@@ -3807,55 +3810,79 @@ def _route_crosses_obstacle(
     )
 
 
+def _owning_bbox(point: tuple[float, float], obstacles: list[BBox]) -> BBox | None:
+    """Return the keepout that contains ``point``, if any.
+
+    Pins sit on their symbol's keepout outline, so matching a routed pin to its
+    own box needs a tolerance wider than the snap epsilon.
+    """
+    tol = SNAP_TOLERANCE_MM * 10
+    for obstacle in obstacles:
+        if (
+            obstacle.x_min - tol <= point[0] <= obstacle.x_max + tol
+            and obstacle.y_min - tol <= point[1] <= obstacle.y_max + tol
+        ):
+            return obstacle
+    return None
+
+
+def _escape_direction(point: tuple[float, float], owner: BBox) -> tuple[float, float]:
+    """Outward unit vector for a pin's 1-grid escape stub.
+
+    A pin lies on the perimeter of its symbol's keepout, so its distance to that
+    edge is zero and the nearest-edge test selects the pin's own edge exactly.  A
+    pin drawn inside the box -- a graphic that overhangs the pin, such as an LED
+    arrow -- falls back to the nearest edge, which is still the way out.
+    """
+    distances = (
+        (abs(point[0] - owner.x_min), (-1.0, 0.0)),
+        (abs(point[0] - owner.x_max), (1.0, 0.0)),
+        (abs(point[1] - owner.y_min), (0.0, -1.0)),
+        (abs(point[1] - owner.y_max), (0.0, 1.0)),
+    )
+    return min(distances, key=lambda candidate: candidate[0])[1]
+
+
 def _route_avoiding_obstacles(
     start: tuple[float, float],
     end: tuple[float, float],
     obstacles: list[BBox],
     snap_to_grid: bool,
-    start_escape_dir: tuple[float, float] | None = None,
-    end_escape_dir: tuple[float, float] | None = None,
 ) -> tuple[list[tuple[float, float, float, float]], str | None]:
-    """Route orthogonal wire segments avoiding obstacles using Escape-and-Route."""
+    """Route orthogonal wire segments between two pins around obstacles.
+
+    Escape-and-route: step one grid unit along each pin's outward normal so A*
+    starts in free space rather than inside the symbol's own keepout, route
+    between the escape points with every keepout active as a hard obstacle, then
+    stitch the stubs back onto the pins.
+
+    When A* cannot find a route the direct run is returned together with an
+    ``obstacle_bypass_failed`` warning.  That fallback may cross a keepout: it is
+    a loud signal for the caller to resolve, not a usable route.
+    """
     direct = _deduplicate_segments(_manhattan_segments(start, end, snap_to_grid))
 
-    # If unobstructed and not crossing ANY obstacle, return direct route
+    # A clear straight or L run that touches no keepout needs no escape stub.
     if direct and not _route_crosses_obstacle(direct, obstacles):
         return direct, None
 
-    # Identify obstacles containing start and end points
-    start_owner: BBox | None = None
-    end_owner: BBox | None = None
-    tol = SNAP_TOLERANCE_MM * 10
-    for obs in obstacles:
-        if obs.x_min - tol <= start[0] <= obs.x_max + tol and obs.y_min - tol <= start[1] <= obs.y_max + tol:
-            start_owner = obs
-        if obs.x_min - tol <= end[0] <= obs.x_max + tol and obs.y_min - tol <= end[1] <= obs.y_max + tol:
-            end_owner = obs
-
     grid = SCHEMATIC_GRID_MM
+
     start_esc = start
-    if start_escape_dir is not None:
-        start_esc = _snap_point(start[0] + start_escape_dir[0] * grid, start[1] + start_escape_dir[1] * grid, snap_to_grid)
-    elif start_owner is not None:
-        d_left = abs(start[0] - start_owner.x_min)
-        d_right = abs(start[0] - start_owner.x_max)
-        d_top = abs(start[1] - start_owner.y_min)
-        d_bot = abs(start[1] - start_owner.y_max)
-        min_d = min(d_left, d_right, d_top, d_bot)
-        dir_v = (0.0, -1.0) if min_d == d_top else (0.0, 1.0) if min_d == d_bot else (-1.0, 0.0) if min_d == d_left else (1.0, 0.0)
-        start_esc = _snap_point(start[0] + dir_v[0] * grid, start[1] + dir_v[1] * grid, snap_to_grid)
+    start_owner = _owning_bbox(start, obstacles)
+    if start_owner is not None:
+        direction = _escape_direction(start, start_owner)
+        start_esc = _snap_point(
+            start[0] + direction[0] * grid, start[1] + direction[1] * grid, snap_to_grid
+        )
 
     end_esc = end
-    if end_escape_dir is not None:
-        end_esc = _snap_point(end[0] + end_escape_dir[0] * grid, end[1] + end_escape_dir[1] * grid, snap_to_grid)
-    elif end_owner is not None:
-        d_left = abs(end[0] - end_owner.x_min)
-        d_right = abs(end[0] - end_owner.x_max)
-        d_top = abs(end[1] - end_owner.y_min)
-        d_bot = abs(end[1] - end_owner.y_max)
-        min_d = min(d_left, d_right, d_top, d_bot)
-        dir_v = (0.0, -1.0) if min_d == d_top else (0.0, 1.0) if min_d == d_bot else (-1.0, 0.0) if min_d == d_left else (1.0, 0.0)
-        end_esc = _snap_point(end[0] + dir_v[0] * grid, end[1] + dir_v[1] * grid, snap_to_grid)
+    end_owner = _owning_bbox(end, obstacles)
+    if end_owner is not None:
+        direction = _escape_direction(end, end_owner)
+        end_esc = _snap_point(
+            end[0] + direction[0] * grid, end[1] + direction[1] * grid, snap_to_grid
+        )
 
     router = SchematicRouter(
         grid_mm=grid,
@@ -3866,50 +3893,16 @@ def _route_avoiding_obstacles(
         max_steps=20000,
     )
     routed = router.route(start_esc, end_esc, max_bends=8)
-    if routed is not None:
-        full_segments = []
-        if start_esc != start:
-            full_segments.append((start[0], start[1], start_esc[0], start_esc[1]))
-        full_segments.extend(routed)
-        if end_esc != end:
-            full_segments.append((end_esc[0], end_esc[1], end[0], end[1]))
-        return _deduplicate_segments(full_segments), None
+    if routed is None:
+        return direct, "WARNING: obstacle_bypass_failed"
 
-    max_y = max(max(start[1], end[1]), *(bbox.y_max for bbox in obstacles))
-    min_y = min(min(start[1], end[1]), *(bbox.y_min for bbox in obstacles))
-    candidate_offsets = [max_y + grid, min_y - grid]
-    for via_y in candidate_offsets:
-        raw = [
-            (start[0], start[1], start[0], via_y),
-            (start[0], via_y, end[0], via_y),
-            (end[0], via_y, end[0], end[1]),
-        ]
-        segments = _deduplicate_segments(raw)
-        if segments and not _route_crosses_obstacle(segments, obstacles):
-            return segments, None
-    return direct, "WARNING: obstacle_bypass_failed"
-    if routed is not None:
-        full_segments = []
-        if start_esc != start:
-            full_segments.append((start[0], start[1], start_esc[0], start_esc[1]))
-        full_segments.extend(routed)
-        if end_esc != end:
-            full_segments.append((end_esc[0], end_esc[1], end[0], end[1]))
-        return _deduplicate_segments(full_segments), None
-
-    max_y = max(max(start[1], end[1]), *(bbox.y_max for bbox in obstacles))
-    min_y = min(min(start[1], end[1]), *(bbox.y_min for bbox in obstacles))
-    candidate_offsets = [max_y + grid, min_y - grid]
-    for via_y in candidate_offsets:
-        raw = [
-            (start[0], start[1], start[0], via_y),
-            (start[0], via_y, end[0], via_y),
-            (end[0], via_y, end[0], end[1]),
-        ]
-        segments = _deduplicate_segments(raw)
-        if segments and not _route_crosses_obstacle(segments, obstacles):
-            return segments, None
-    return direct, "WARNING: obstacle_bypass_failed"
+    full_segments: list[tuple[float, float, float, float]] = []
+    if start_esc != start:
+        full_segments.append((start[0], start[1], start_esc[0], start_esc[1]))
+    full_segments.extend(routed)
+    if end_esc != end:
+        full_segments.append((end_esc[0], end_esc[1], end[0], end[1]))
+    return _deduplicate_segments(full_segments), None
 
 
 def _resolve_net_endpoint(
