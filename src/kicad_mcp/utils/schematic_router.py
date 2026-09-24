@@ -30,7 +30,7 @@ class SchematicRouter:
         self,
         grid_mm: float = 2.54,
         obstacles: list[RouterBBox] | None = None,
-        max_steps: int = 200,
+        max_steps: int = 20000,
     ) -> None:
         self.grid_mm = grid_mm
         self.obstacles = list(obstacles or [])

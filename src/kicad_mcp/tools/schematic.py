@@ -3876,9 +3876,9 @@ def _route_avoiding_obstacles(
             RouterBBox(obstacle.x_min, obstacle.y_min, obstacle.x_max, obstacle.y_max)
             for obstacle in obstacles
         ],
-        max_steps=500,
+        max_steps=20000,
     )
-    routed = router.route(start_esc, end_esc, max_bends=4)
+    routed = router.route(start_esc, end_esc, max_bends=8)
     if routed is not None:
         full_segments = []
         if start_esc != start:
