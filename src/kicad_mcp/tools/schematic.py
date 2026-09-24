@@ -3818,32 +3818,19 @@ def _route_avoiding_obstacles(
     """Route orthogonal wire segments avoiding obstacles using Escape-and-Route."""
     direct = _deduplicate_segments(_manhattan_segments(start, end, snap_to_grid))
 
+    # If unobstructed and not crossing ANY obstacle, return direct route
+    if direct and not _route_crosses_obstacle(direct, obstacles):
+        return direct, None
+
     # Identify obstacles containing start and end points
     start_owner: BBox | None = None
     end_owner: BBox | None = None
-    intervening: list[BBox] = []
     tol = SNAP_TOLERANCE_MM * 10
     for obs in obstacles:
-        is_start = (obs.x_min - tol <= start[0] <= obs.x_max + tol and obs.y_min - tol <= start[1] <= obs.y_max + tol)
-        is_end = (obs.x_min - tol <= end[0] <= obs.x_max + tol and obs.y_min - tol <= end[1] <= obs.y_max + tol)
-        if is_start:
+        if obs.x_min - tol <= start[0] <= obs.x_max + tol and obs.y_min - tol <= start[1] <= obs.y_max + tol:
             start_owner = obs
-        if is_end:
+        if obs.x_min - tol <= end[0] <= obs.x_max + tol and obs.y_min - tol <= end[1] <= obs.y_max + tol:
             end_owner = obs
-        if not is_start and not is_end:
-            intervening.append(obs)
-
-    if not intervening or not _route_crosses_obstacle(direct, intervening):
-        start_ok = True
-        end_ok = True
-        if start_owner is not None and start_escape_dir is not None and direct:
-            first_seg = direct[0]
-            dx = first_seg[2] - first_seg[0]
-            dy = first_seg[3] - first_seg[1]
-            if (start_escape_dir[0] != 0 and dx * start_escape_dir[0] < 0) or (start_escape_dir[1] != 0 and dy * start_escape_dir[1] < 0):
-                start_ok = False
-        if start_ok and end_ok:
-            return direct, None
 
     grid = SCHEMATIC_GRID_MM
     start_esc = start
@@ -3879,6 +3866,28 @@ def _route_avoiding_obstacles(
         max_steps=20000,
     )
     routed = router.route(start_esc, end_esc, max_bends=8)
+    if routed is not None:
+        full_segments = []
+        if start_esc != start:
+            full_segments.append((start[0], start[1], start_esc[0], start_esc[1]))
+        full_segments.extend(routed)
+        if end_esc != end:
+            full_segments.append((end_esc[0], end_esc[1], end[0], end[1]))
+        return _deduplicate_segments(full_segments), None
+
+    max_y = max(max(start[1], end[1]), *(bbox.y_max for bbox in obstacles))
+    min_y = min(min(start[1], end[1]), *(bbox.y_min for bbox in obstacles))
+    candidate_offsets = [max_y + grid, min_y - grid]
+    for via_y in candidate_offsets:
+        raw = [
+            (start[0], start[1], start[0], via_y),
+            (start[0], via_y, end[0], via_y),
+            (end[0], via_y, end[0], end[1]),
+        ]
+        segments = _deduplicate_segments(raw)
+        if segments and not _route_crosses_obstacle(segments, obstacles):
+            return segments, None
+    return direct, "WARNING: obstacle_bypass_failed"
     if routed is not None:
         full_segments = []
         if start_esc != start:
