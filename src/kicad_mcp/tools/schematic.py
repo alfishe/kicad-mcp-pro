@@ -2469,19 +2469,19 @@ def get_symbol_primitive_bounds(
 
         for target in target_blocks:
             for mx, my in re.findall(r"\(xy\s+([-\d.]+)\s+([-\d.]+)\)", target):
-                rx, ry = rotate_point(float(mx), -float(my), rotation)
+                rx, ry = rotate_point(float(mx), -float(my), -rotation)
                 xs.append(sym_x + rx)
                 ys.append(sym_y + ry)
 
             for mx, my in re.findall(r"\((?:start|end|mid)\s+([-\d.]+)\s+([-\d.]+)\)", target):
-                rx, ry = rotate_point(float(mx), -float(my), rotation)
+                rx, ry = rotate_point(float(mx), -float(my), -rotation)
                 xs.append(sym_x + rx)
                 ys.append(sym_y + ry)
 
             for cx_str, cy_str, r_str in re.findall(
                 r"\(circle\s+\(center\s+([-\d.]+)\s+([-\d.]+)\)\s+\(radius\s+([-\d.]+)\)", target
             ):
-                rcx, rcy = rotate_point(float(cx_str), -float(cy_str), rotation)
+                rcx, rcy = rotate_point(float(cx_str), -float(cy_str), -rotation)
                 r = float(r_str)
                 xs.extend([sym_x + rcx - r, sym_x + rcx + r])
                 ys.extend([sym_y + rcy - r, sym_y + rcy + r])
@@ -2489,7 +2489,7 @@ def get_symbol_primitive_bounds(
             for mx, my, _ in re.findall(
                 r"\(pin\s+[a-z_]+\s+[a-z_]+\s+\(at\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\)", target
             ):
-                rx, ry = rotate_point(float(mx), -float(my), rotation)
+                rx, ry = rotate_point(float(mx), -float(my), -rotation)
                 xs.append(sym_x + rx)
                 ys.append(sym_y + ry)
 
