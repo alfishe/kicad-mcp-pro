@@ -96,7 +96,7 @@ def validate_repository(root: Path, policy: dict[str, object]) -> list[str]:
         "default_workflow_permissions": "read",
         "github_owned_allowed": True,
         "sha_pinning_required": True,
-        "verified_allowed": False,
+        "verified_allowed": True,
     }
     if settings != expected_settings:
         errors.append("actions-policy.json: repository_settings do not match the hardened baseline")

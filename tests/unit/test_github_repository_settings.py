@@ -30,7 +30,7 @@ def _expected_payloads() -> tuple[dict[str, object], dict[str, object], dict[str
     }
     selected = {
         "github_owned_allowed": True,
-        "verified_allowed": False,
+        "verified_allowed": True,
         "patterns_allowed": expected_selected_patterns(POLICY),
     }
     workflow = {

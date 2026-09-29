@@ -21,7 +21,7 @@ def _baseline_policy() -> dict[str, Any]:
             "default_workflow_permissions": "read",
             "github_owned_allowed": True,
             "sha_pinning_required": True,
-            "verified_allowed": False,
+            "verified_allowed": True,
         },
         "github_owned_action_owners": ["actions", "github"],
         "allowed_action_repositories": [],

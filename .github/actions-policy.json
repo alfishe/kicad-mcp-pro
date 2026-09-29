@@ -6,7 +6,7 @@
     "default_workflow_permissions": "read",
     "github_owned_allowed": true,
     "sha_pinning_required": true,
-    "verified_allowed": false
+    "verified_allowed": true
   },
   "github_owned_action_owners": [
     "actions",
