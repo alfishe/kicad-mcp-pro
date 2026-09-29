@@ -12,11 +12,15 @@ Three layers used to fail together, and each gets its own coverage here:
    of inside a padded symbol box, then routes between the escape points with
    every symbol box active as a hard keepout.
 
-3. Inter-net awareness -- the router still has none.  Independently routed nets
-   converge on the same lowest-cost channels and merge by geometry in KiCad,
-   which is a silent short.  ``test_router_lacks_inter_net_awareness`` documents
-   that gap as ``xfail(strict=True)``: fixing the router turns the test red and
-   forces the marker to be removed rather than quietly forgotten.
+3. Inter-net awareness -- the router avoids other nets.  Independently routed
+   nets used to converge on the same lowest-cost channels and merge by geometry
+   in KiCad, a silent short.  ``_route_avoiding_obstacles`` now takes the wire
+   geometry owned by other nets and refuses to run along it or to land an
+   endpoint on it, while still allowing the perpendicular crossings a
+   non-planar sheet needs to be routable at all.
+   ``test_independent_nets_survive_geometry_union`` measures the result by
+   re-deriving nets with KiCad's own union rules rather than trusting the
+   router's bookkeeping.
 
 Most tests run against hermetic fixture libraries written into ``tmp_path``, so
 they exercise the real parsing and routing code on a bare CI runner with no
@@ -43,10 +47,16 @@ from kicad_mcp.tools.schematic import (
     get_pin_positions,
     get_symbol_primitive_bounds,
 )
+from kicad_mcp.utils.schematic_router import CROSSING_PENALTY, SchematicRouter
 
 _EPS = 1e-6
 _MM = tuple[float, float]
 _Segment = tuple[float, float, float, float]
+
+#: Orderings tried before declaring a sheet unroutable.  Channel ownership is
+#: decided by routing order, so a bounded reordering stands in for rip-up and
+#: reroute; the first two orderings already cover the in-order case.
+_ORDER_ATTEMPTS = 16
 
 #: Fixture library.  Each symbol mirrors the drawn geometry of a real KiCad
 #: symbol closely enough to exercise every primitive branch of the extent
@@ -471,19 +481,55 @@ def _random_nets(seed: int) -> list[list[dict[str, object]]]:
     return nets
 
 
-def _route_net(group: list[dict[str, object]], boxes: list[BBox]) -> list[_Segment]:
-    """Route one net's pins together and collect its segments."""
+def _route_net(
+    group: list[dict[str, object]],
+    boxes: list[BBox],
+    occupied: list[_Segment] | None = None,
+) -> tuple[list[_Segment], int]:
+    """Route one net's pins together into ``occupied``.
+
+    ``occupied`` carries the geometry owned by nets already routed.  It is
+    handed to the router, which must not merge with it, and then extended with
+    this net's own runs so every later net keeps clear of both.
+
+    Returns the net's segments and the count of targets whose only remaining
+    channels were already taken.  A refused target contributes no geometry at
+    all: landing on a foreign wire is the one outcome that is never acceptable,
+    so the run is dropped and counted rather than quietly drawn.
+    """
     segments: list[_Segment] = []
+    refused = 0
     for target in group[1:]:
         routed, warning = _route_avoiding_obstacles(
             group[0]["point"],  # type: ignore[arg-type]
             target["point"],  # type: ignore[arg-type]
             boxes,
             True,
+            occupied,
         )
-        assert warning is None
+        if warning is not None:
+            refused += 1
+            continue
         segments.extend(routed)
-    return segments
+    if occupied is not None:
+        occupied.extend(segments)
+    return segments, refused
+
+
+def _route_batch(
+    nets: list[list[dict[str, object]]],
+    boxes: list[BBox],
+    order: list[int],
+) -> tuple[dict[int, list[_Segment]], int]:
+    """Route every net in ``order``, each one clear of everything before it."""
+    occupied: list[_Segment] = []
+    net_segments: dict[int, list[_Segment]] = {}
+    refused = 0
+    for index in order:
+        segments, missed = _route_net(nets[index], boxes, occupied)
+        net_segments[index + 1] = segments
+        refused += missed
+    return net_segments, refused
 
 
 # --------------------------------------------------------------------------- #
@@ -738,26 +784,45 @@ def test_route_reports_a_warning_when_no_path_exists() -> None:
     assert segments
 
 
-def test_route_escapes_one_grid_step_along_the_outward_normal(
+def test_direct_run_may_touch_the_pins_own_keepout(
     boxes_by_ref: dict[str, BBox],
 ) -> None:
-    """R1 pin 1 and LED1 pin 2 are joined above the capacitor between them.
+    """A pin sits on its symbol's outline, so the direct run touches its own box.
 
-    Pin 1 of the fixture resistor sits on the top edge, so the stub must be
-    exactly one 1.27 mm grid step in -Y before any horizontal travel happens.
+    R1 pin 1 and C1 pin 1 share a row with no body between them, so the plain
+    straight run is the right answer.  Counting the pins' *own* keepout edges as
+    collisions used to reject exactly this and push the route through the escape
+    machinery, where it collected crossings it never needed.
     """
     start, end = _pin("R1", "1"), _pin("C1", "1")
     segments, warning = _route_avoiding_obstacles(start, end, list(boxes_by_ref.values()), True)
 
     assert warning is None
+    assert segments == [(*start, *end)]
+    assert not _foreign_crossings(segments, boxes_by_ref, {"R1", "C1"})
+
+
+def test_route_escapes_one_grid_step_along_the_outward_normal(
+    boxes_by_ref: dict[str, BBox],
+) -> None:
+    """Each pin leaves its symbol by one grid along its own outward normal.
+
+    R1 pin 1 and Q1's collector both sit on the top edge of their keepout, and
+    there are bodies between them, so the direct run is unusable and both stubs
+    are drawn: exactly one 1.27 mm step in -Y before any horizontal travel.
+    Pins sharing a row now take the direct run instead, which is why this case
+    uses pins on different rows.
+    """
+    start, end = _pin("R1", "1"), _pin("Q1", "C")
+    segments, warning = _route_avoiding_obstacles(start, end, list(boxes_by_ref.values()), True)
+
+    assert warning is None
     # Compare against the router's own grid snap so the stub endpoint matches
     # bit for bit rather than within a floating point tolerance.
-    _, stub_y = _snap_point(start[0], start[1] - SCHEMATIC_GRID_MM, True)
-    assert (start[0], stub_y, start[0], start[1]) in segments
-    assert (end[0], stub_y, end[0], end[1]) in segments
-    # Travel happens on the escape row, clear of every intervening body.
-    assert any(abs(s[1] - stub_y) <= _EPS and abs(s[3] - stub_y) <= _EPS for s in segments)
-    assert not _foreign_crossings(segments, boxes_by_ref, {"R1", "C1"})
+    for pin in (start, end):
+        _, stub_y = _snap_point(pin[0], pin[1] - SCHEMATIC_GRID_MM, True)
+        assert (pin[0], stub_y, pin[0], pin[1]) in segments, f"no clean stub at {pin}"
+    assert not _foreign_crossings(segments, boxes_by_ref, {"R1", "Q1"})
 
 
 def test_route_never_penetrates_an_intervening_component(
@@ -828,7 +893,10 @@ def test_escape_route_replaces_the_padded_keepout_trap(
         "precondition: the padded box is expected to swallow the start pin"
     )
 
-    segments, warning = _route_avoiding_obstacles(start, end, boxes, True)
+    # Route against the padded keepouts the docstring describes.  The pin then
+    # sits four grid steps inside its own box, so the escape stub has to reach
+    # further than one step before A* can start in free space.
+    segments, warning = _route_avoiding_obstacles(start, end, padded, True)
 
     assert warning is None
     assert len(segments) >= 3
@@ -840,7 +908,8 @@ def test_single_net_route_is_self_consistent(boxes_by_ref: dict[str, BBox]) -> N
     boxes = list(boxes_by_ref.values())
     for seed in range(4):
         for group in _random_nets(seed):
-            segments = _route_net(group, boxes)
+            segments, refused = _route_net(group, boxes)
+            assert refused == 0
             owners = {str(group[0]["ref"]), *(str(t["ref"]) for t in group[1:])}
             for x1, y1, x2, y2 in segments:
                 assert abs(x1 - x2) <= _EPS or abs(y1 - y2) <= _EPS, "wire is not orthogonal"
@@ -848,34 +917,134 @@ def test_single_net_route_is_self_consistent(boxes_by_ref: dict[str, BBox]) -> N
 
 
 # --------------------------------------------------------------------------- #
-# 3. known defect: the router has no inter-net awareness
+# 3. inter-net awareness: nets keep clear of each other
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Router lacks inter-net awareness: each net is routed independently "
-        "against component keepouts only, so independent nets converge on the "
-        "same lowest-cost channels and merge by geometry in KiCad (silent "
-        "short). Measured on a 10-symbol sheet over 40 random partitions: 15 "
-        "intended nets collapse to a mean of 3.5, and to 1 at the worst seed. "
-        "Removing this marker requires per-net occupancy or a net-aware dedup "
-        "guard on collinear segments owned by different nets."
-    ),
-)
-def test_router_lacks_inter_net_awareness(boxes_by_ref: dict[str, BBox]) -> None:
-    """Independent nets must survive geometry union as distinct nets."""
+def test_independent_nets_survive_geometry_union(boxes_by_ref: dict[str, BBox]) -> None:
+    """Independent nets must survive geometry union as distinct nets.
+
+    Every net is routed against the component keepouts *plus* the geometry of
+    the nets routed before it, and the nets are then re-derived with KiCad's own
+    union rules.  Two separate things are checked.
+
+    *Safety, for every ordering tried:* no two nets may end up sharing geometry.
+    A net whose remaining channels are all taken drops the run and reports it,
+    so the worst a bad ordering can do is leave a net unrouted -- never union
+    two nets into one.
+
+    *Capability:* at least one ordering must route the whole sheet cleanly.
+    Which net claims a channel first is what decides the rest, so a bounded set
+    of orderings is tried; a greedy router that only ever succeeded for lucky
+    orderings would not be good enough.
+    """
     boxes = list(boxes_by_ref.values())
     for seed in range(4):
         nets = _random_nets(seed)
-        net_segments = {
-            index: _route_net(group, boxes) for index, group in enumerate(nets, start=1)
-        }
-        distinct = _distinct_nets(net_segments)
-        assert net_segments
-        assert distinct == len(nets), (
-            f"seed {seed}: {len(nets)} independent nets collapsed to {distinct} "
-            f"after KiCad unions wires by geometry"
+        best = len(nets)
+        for attempt in range(_ORDER_ATTEMPTS):
+            order = list(range(len(nets)))
+            if attempt:
+                random.Random(seed * _ORDER_ATTEMPTS + attempt).shuffle(order)  # noqa: S311
+            net_segments, refused = _route_batch(nets, boxes, order)
+            distinct = _distinct_nets(net_segments)
+            assert distinct == len(nets), (
+                f"seed {seed} attempt {attempt}: {len(nets)} independent nets collapsed to "
+                f"{distinct} once KiCad unions wires by geometry"
+            )
+            best = min(best, refused)
+            if refused == 0:
+                break
+        assert best == 0, (
+            f"seed {seed}: {best} pin connection(s) could not be routed clear of the "
+            f"other nets across {_ORDER_ATTEMPTS} orderings"
         )
+
+
+def test_perpendicular_crossing_does_not_merge_two_nets() -> None:
+    """A crossing is not a connection; only overlap and endpoint contact are.
+
+    Banning crossings outright would make a non-planar sheet unroutable, so the
+    router must still be able to pass one net over another.  This pins the
+    asymmetry down: crossing runs stay two nets, a collinear run along a foreign
+    wire merges, and so does an endpoint landing on one.
+    """
+    horizontal = (0.0, 10.0, 20.0, 10.0)
+    crossing = (10.0, 0.0, 10.0, 20.0)
+    overlapping = (0.0, 10.0, 20.0, 10.0)
+    touching = (10.0, 10.0, 30.0, 10.0)
+    landing = (10.0, 0.0, 10.0, 10.0)
+
+    assert schematic_module.segments_merge(horizontal, crossing) is False
+    assert schematic_module.segments_merge(horizontal, overlapping) is True
+    assert schematic_module.segments_merge(horizontal, touching) is True
+    assert schematic_module.segments_merge(horizontal, landing) is True
+
+
+def test_router_prices_a_crossing_above_a_short_detour() -> None:
+    """A crossing is a cost, not a wall, and the price is what changes the route.
+
+    A run along ``y = 0`` meets one foreign wire crossing it.  Stepping over it
+    costs four extra grid moves plus two extra bends -- 10 -- while the crossing
+    is priced at ``CROSSING_PENALTY``.  So the priced router steps over and the
+    router with the price removed goes straight through, which is what shows the
+    price is doing the work rather than some other rule.
+    """
+    foreign: list[_Segment] = [(6.35, -1.27, 6.35, 1.27)]
+    straight = [(0.0, 0.0, 12.7, 0.0)]
+
+    priced = SchematicRouter(grid_mm=SCHEMATIC_GRID_MM, occupied=foreign)
+    unpriced = SchematicRouter(grid_mm=SCHEMATIC_GRID_MM, occupied=foreign, crossing_penalty=0.0)
+
+    priced_segments = priced.route((0.0, 0.0), (12.7, 0.0), max_bends=6)
+    unpriced_segments = unpriced.route((0.0, 0.0), (12.7, 0.0), max_bends=6)
+
+    # Precondition: the four extra moves and two extra bends are the cheaper
+    # option, so only the crossing price can justify taking them.
+    assert CROSSING_PENALTY > 4 + 2 * 3
+    assert priced_segments is not None
+    assert unpriced_segments is not None
+    assert schematic_module._net_crossings(priced_segments, foreign) == 0
+    assert schematic_module._net_crossings(unpriced_segments, foreign) == 1
+    assert unpriced_segments == straight
+
+
+def test_an_enormous_penalty_still_never_merges_two_nets() -> None:
+    """Pricing a crossing must never tempt the router into a short instead.
+
+    With the price pushed absurdly high the search still may not overlap a
+    foreign wire or land an endpoint on one -- those stay hard refusals -- so
+    the worst a silly price can buy is a silly detour.
+    """
+    foreign: list[_Segment] = [(6.35, -1.27, 6.35, 1.27)]
+
+    router = SchematicRouter(grid_mm=SCHEMATIC_GRID_MM, occupied=foreign, crossing_penalty=10_000.0)
+    segments = router.route((0.0, 0.0), (12.7, 0.0), max_bends=6)
+
+    assert segments is not None
+    assert not any(
+        schematic_module.segments_merge(segment, other) for segment in segments for other in foreign
+    )
+
+
+def test_route_refuses_to_run_along_a_foreign_net() -> None:
+    """Given a wire already in the way, the route takes another channel.
+
+    The obstructing run sits on the row a naive L route would use.  Sharing it
+    would union the two nets in KiCad, so the router must leave that row alone
+    and still reach the target.
+    """
+    start = (0.0, 0.0)
+    end = (20.32, 10.16)
+    foreign = [(5.08, 0.0, 25.4, 0.0)]
+
+    segments, warning = _route_avoiding_obstacles(start, end, [], True, foreign)
+
+    assert warning is None
+    assert segments
+    assert not any(
+        schematic_module.segments_merge(segment, other) for segment in segments for other in foreign
+    )
+    # The direct L run is exactly what had to be rejected.
+    assert (0.0, 0.0, 20.32, 0.0) not in segments
 
 
 # --------------------------------------------------------------------------- #

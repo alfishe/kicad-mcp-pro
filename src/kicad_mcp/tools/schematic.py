@@ -76,7 +76,13 @@ from ..utils.field_placer import FieldSpec, autoplace_fields
 from ..utils.geometry import Box as GeoBox
 from ..utils.geometry import body_box_from_pins, text_extent
 from ..utils.schematic_roundtrip import dropped_nodes
-from ..utils.schematic_router import RouterBBox, SchematicRouter
+from ..utils.schematic_router import (
+    RouterBBox,
+    SchematicRouter,
+    perpendicular_crossing,
+    point_on_segment,
+    segments_merge,
+)
 from ..utils.sexpr import (
     _escape_sexpr_string,
     _extract_block,
@@ -3880,11 +3886,177 @@ def _escape_direction(point: tuple[float, float], owner: BBox) -> tuple[float, f
     return min(distances, key=lambda candidate: candidate[0])[1]
 
 
+#: Bend budget for one routed connection.  Ducking a crossing normally costs two
+#: extra bends, so the earlier cap of 8 was reachable by an otherwise ordinary
+#: detour; 12 leaves room for that without letting a route become spaghetti.
+MAX_ROUTE_BENDS = 12
+
+#: How far an escape stub may walk along its pin's outward normal before giving
+#: up.  One step clears a pin sitting on its keepout outline, which is the normal
+#: case; the rest is headroom for a pin whose own symbol overhangs it -- a wide
+#: reference-circuit box, a graphic drawn past the pin -- so the pin is escaped
+#: rather than declared unroutable.
+MAX_ESCAPE_GRID = 6
+
+
+def _route_merges_with_occupied(
+    segments: list[tuple[float, float, float, float]],
+    occupied: list[tuple[float, float, float, float]] | None,
+) -> bool:
+    """True when any run would union with a wire owned by another net."""
+    if not occupied:
+        return False
+    return any(segments_merge(segment, other) for segment in segments for other in occupied)
+
+
+def _segment_penetrates_bbox(
+    segment: tuple[float, float, float, float],
+    bbox: BBox,
+) -> bool:
+    """True only when a run crosses into the *interior* of a keepout."""
+    x1, y1, x2, y2 = segment
+    if abs(y1 - y2) <= SNAP_TOLERANCE_MM:
+        if bbox.y_min + SNAP_TOLERANCE_MM < y1 < bbox.y_max - SNAP_TOLERANCE_MM:
+            return max(min(x1, x2), bbox.x_min) < min(max(x1, x2), bbox.x_max) - SNAP_TOLERANCE_MM
+        return False
+    if abs(x1 - x2) <= SNAP_TOLERANCE_MM:
+        if bbox.x_min + SNAP_TOLERANCE_MM < x1 < bbox.x_max - SNAP_TOLERANCE_MM:
+            return max(min(y1, y2), bbox.y_min) < min(max(y1, y2), bbox.y_max) - SNAP_TOLERANCE_MM
+        return False
+    return False
+
+
+def _route_hits_keepouts(
+    segments: list[tuple[float, float, float, float]],
+    obstacles: list[BBox],
+    owners: set[int],
+) -> bool:
+    """Whether a run touches a foreign body, or cuts into one of its own.
+
+    A pin lies on its symbol's keepout outline, so a run leaving that pin starts
+    on the edge by construction.  Counting that touch as a collision is what
+    pushed ordinary two-segment routes into the escape machinery, where they
+    collected crossings on the way around.  Touching *another* symbol is still a
+    defect, and entering either symbol's interior always is.
+    """
+    for segment in segments:
+        for obstacle in obstacles:
+            if id(obstacle) in owners:
+                if _segment_penetrates_bbox(segment, obstacle):
+                    return True
+            elif _segment_intersects_bbox(segment, obstacle):
+                return True
+    return False
+
+
+def _net_crossings(
+    segments: list[tuple[float, float, float, float]],
+    occupied: list[tuple[float, float, float, float]] | None,
+) -> int:
+    """Perpendicular passes over wires owned by other nets.
+
+    These do not connect in KiCad -- no junction is placed and both nets stay
+    separate -- so they are a readability defect rather than an electrical one,
+    and worth reporting rather than forbidding.
+    """
+    if not occupied:
+        return 0
+    return sum(
+        1 for segment in segments for other in occupied if perpendicular_crossing(segment, other)
+    )
+
+
+def _net_wire_segments(
+    wires: list[tuple[float, float, float, float]],
+    anchors: list[tuple[float, float]],
+) -> list[tuple[float, float, float, float]]:
+    """Existing wires joined to ``anchors`` -- the net a route is extending.
+
+    KiCad derives nets from geometry alone, so "the same net" is exactly the
+    connected component of touching wires that reaches a pin of that net.
+    """
+    seen: set[int] = {
+        index
+        for index in range(len(wires))
+        if any(point_on_segment(anchor, wires[index]) for anchor in anchors)
+    }
+    frontier = sorted(seen)
+    while frontier:
+        reached: list[int] = []
+        for index in frontier:
+            for other in range(len(wires)):
+                if other in seen:
+                    continue
+                if segments_merge(wires[index], wires[other]):
+                    seen.add(other)
+                    reached.append(other)
+        frontier = reached
+    return [wires[index] for index in sorted(seen)]
+
+
+def _foreign_wire_segments(
+    content: str,
+    anchors: list[tuple[float, float]],
+) -> list[tuple[float, float, float, float]]:
+    """Existing wires that belong to a different net than the anchored one."""
+    wires = _wire_segments_from_content(content)
+    if not wires:
+        return []
+    own = {_segment_key(segment) for segment in _net_wire_segments(wires, anchors)}
+    return [segment for segment in wires if _segment_key(segment) not in own]
+
+
+def _escape_point(
+    point: tuple[float, float],
+    owner: BBox,
+    obstacles: list[BBox],
+    occupied: list[tuple[float, float, float, float]] | None,
+    grid_mm: float,
+    snap_to_grid: bool,
+) -> tuple[float, float]:
+    """First free landing spot for a pin's escape stub.
+
+    The stub leaves along the pin's outward normal.  That one grid step can
+    already be taken -- a wire another net routed earlier may pass through it,
+    and a stub ending on that wire unions the two nets -- so the outward run is
+    lengthened first, which merely steps across a wire lying in the way, and only
+    then are the other three edges tried.  A landing inside the pin's own keepout
+    is never a candidate: escaping into the body of the symbol being left is how
+    a route ends up walled in.  The search reaches ``MAX_ESCAPE_GRID`` steps, so a
+    pin whose own symbol overhangs it by more than one grid unit still gets out.
+    Falling back to the plain outward normal keeps an impossible escape visible
+    downstream instead of hiding it.
+    """
+    primary = _escape_direction(point, owner)
+    edges = ((-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0))
+    distances = range(1, MAX_ESCAPE_GRID + 1)
+    attempts = [(primary, distance) for distance in distances]
+    attempts += [(edge, distance) for edge in edges if edge != primary for distance in distances]
+    for direction, distance in attempts:
+        landed = _snap_point(
+            point[0] + direction[0] * grid_mm * distance,
+            point[1] + direction[1] * grid_mm * distance,
+            snap_to_grid,
+        )
+        if owner.x_min <= landed[0] <= owner.x_max and owner.y_min <= landed[1] <= owner.y_max:
+            continue
+        stub = (point[0], point[1], landed[0], landed[1])
+        if _route_merges_with_occupied([stub], occupied):
+            continue
+        if any(_segment_intersects_bbox(stub, other) for other in obstacles if other is not owner):
+            continue
+        return landed
+    return _snap_point(
+        point[0] + primary[0] * grid_mm, point[1] + primary[1] * grid_mm, snap_to_grid
+    )
+
+
 def _route_avoiding_obstacles(
     start: tuple[float, float],
     end: tuple[float, float],
     obstacles: list[BBox],
     snap_to_grid: bool,
+    occupied: list[tuple[float, float, float, float]] | None = None,
 ) -> tuple[list[tuple[float, float, float, float]], str | None]:
     """Route orthogonal wire segments between two pins around obstacles.
 
@@ -3893,33 +4065,49 @@ def _route_avoiding_obstacles(
     between the escape points with every keepout active as a hard obstacle, then
     stitch the stubs back onto the pins.
 
+    ``occupied`` carries the wire geometry of *other* nets.  Those runs are not
+    solid -- the router may cross one perpendicularly, and must, because a
+    purely non-crossing router cannot connect a non-planar sheet.  What it will
+    not do is run along one, turn on one, or land an endpoint on one, since each
+    of those makes KiCad union two nets into a silent short.
+
     When A* cannot find a route the direct run is returned together with an
     ``obstacle_bypass_failed`` warning.  That fallback may cross a keepout: it is
-    a loud signal for the caller to resolve, not a usable route.
+    a loud signal for the caller to resolve, not a usable route.  A route that
+    would instead merge with another net reports ``net_isolation_failed``, and
+    one whose remaining crossings were unavoidable reports
+    ``net_crossing_unavoidable``.
     """
     direct = _deduplicate_segments(_manhattan_segments(start, end, snap_to_grid))
 
-    # A clear straight or L run that touches no keepout needs no escape stub.
-    if direct and not _route_crosses_obstacle(direct, obstacles):
+    start_owner = _owning_bbox(start, obstacles)
+    end_owner = _owning_bbox(end, obstacles)
+    owners = {id(box) for box in (start_owner, end_owner) if box is not None}
+
+    # The direct run is taken only when it is clean on every axis.  If it merely
+    # crosses another net, A* gets to trade length and bends against that
+    # crossing: a longer run with fewer crossings is the better schematic.
+    if (
+        direct
+        and not _route_hits_keepouts(direct, obstacles, owners)
+        and not _route_merges_with_occupied(direct, occupied)
+        and not _net_crossings(direct, occupied)
+    ):
         return direct, None
 
     grid = SCHEMATIC_GRID_MM
 
-    start_esc = start
-    start_owner = _owning_bbox(start, obstacles)
-    if start_owner is not None:
-        direction = _escape_direction(start, start_owner)
-        start_esc = _snap_point(
-            start[0] + direction[0] * grid, start[1] + direction[1] * grid, snap_to_grid
-        )
+    start_esc = (
+        _escape_point(start, start_owner, obstacles, occupied, grid, snap_to_grid)
+        if start_owner is not None
+        else start
+    )
 
-    end_esc = end
-    end_owner = _owning_bbox(end, obstacles)
-    if end_owner is not None:
-        direction = _escape_direction(end, end_owner)
-        end_esc = _snap_point(
-            end[0] + direction[0] * grid, end[1] + direction[1] * grid, snap_to_grid
-        )
+    end_esc = (
+        _escape_point(end, end_owner, obstacles, occupied, grid, snap_to_grid)
+        if end_owner is not None
+        else end
+    )
 
     router = SchematicRouter(
         grid_mm=grid,
@@ -3928,9 +4116,19 @@ def _route_avoiding_obstacles(
             for obstacle in obstacles
         ],
         max_steps=20000,
+        occupied=list(occupied or []),
     )
-    routed = router.route(start_esc, end_esc, max_bends=8)
+    routed = router.route(start_esc, end_esc, max_bends=MAX_ROUTE_BENDS)
     if routed is None:
+        if (
+            direct
+            and not _route_hits_keepouts(direct, obstacles, owners)
+            and not _route_merges_with_occupied(direct, occupied)
+        ):
+            # The detour search gave up, but the direct run is usable -- it just
+            # has to cross other nets.  Say so rather than reporting a keepout
+            # bypass that never happened.
+            return direct, "WARNING: net_crossing_unavoidable"
         return direct, "WARNING: obstacle_bypass_failed"
 
     full_segments: list[tuple[float, float, float, float]] = []
@@ -3939,7 +4137,12 @@ def _route_avoiding_obstacles(
     full_segments.extend(routed)
     if end_esc != end:
         full_segments.append((end_esc[0], end_esc[1], end[0], end[1]))
-    return _deduplicate_segments(full_segments), None
+    segments = _deduplicate_segments(full_segments)
+    if _route_merges_with_occupied(segments, occupied):
+        # An escape stub or a stitched end landed on another net's wire.  Report
+        # it loudly rather than hand back a route that shorts two nets.
+        return direct, "WARNING: net_isolation_failed"
+    return segments, None
 
 
 def _resolve_net_endpoint(
@@ -6042,17 +6245,33 @@ def _connectivity_symbol_bboxes(content: str) -> list[BoundingBoxLike]:
     return cast(list[BoundingBoxLike], _get_symbol_bboxes(content))
 
 
+def _connectivity_foreign_wire_segments(
+    content: str,
+    anchors: list[tuple[float, float]],
+) -> list[tuple[float, float, float, float]]:
+    return _foreign_wire_segments(content, anchors)
+
+
+def _connectivity_net_crossings(
+    segments: list[tuple[float, float, float, float]],
+    occupied: list[tuple[float, float, float, float]],
+) -> int:
+    return _net_crossings(segments, occupied)
+
+
 def _connectivity_route_avoiding_obstacles(
     start: tuple[float, float],
     end: tuple[float, float],
     obstacles: list[BoundingBoxLike],
     snap_to_grid: bool,
+    occupied: list[tuple[float, float, float, float]] | None = None,
 ) -> tuple[list[tuple[float, float, float, float]], str | None]:
     return _route_avoiding_obstacles(
         start,
         end,
         cast(list[BBox], obstacles),
         snap_to_grid,
+        occupied,
     )
 
 
@@ -6429,6 +6648,8 @@ def _register_authoring(mcp: FastMCP) -> None:
         active_schematic_file=_get_schematic_file,
         split_lib_id=_split_lib_id,
         get_symbol_bboxes=_connectivity_symbol_bboxes,
+        foreign_wire_segments=_connectivity_foreign_wire_segments,
+        count_net_crossings=_connectivity_net_crossings,
         route_avoiding_obstacles=_connectivity_route_avoiding_obstacles,
         run_auto_add_missing_junctions=run_auto_add_missing_junctions,
         snap_tolerance_mm=SNAP_TOLERANCE_MM,

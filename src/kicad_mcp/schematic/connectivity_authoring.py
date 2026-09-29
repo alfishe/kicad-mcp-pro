@@ -93,12 +93,21 @@ class SchematicConnectivityAuthoringService:
     active_schematic_file: Callable[[], Path]
     split_lib_id: Callable[[str], tuple[str, str]]
     get_symbol_bboxes: Callable[[str], list[BoundingBoxLike]]
+    foreign_wire_segments: Callable[
+        [str, list[tuple[float, float]]],
+        list[WireSegment],
+    ]
+    count_net_crossings: Callable[
+        [list[WireSegment], list[WireSegment]],
+        int,
+    ]
     route_avoiding_obstacles: Callable[
         [
             tuple[float, float],
             tuple[float, float],
             list[BoundingBoxLike],
             bool,
+            list[WireSegment] | None,
         ],
         tuple[list[WireSegment], str | None],
     ]
@@ -431,12 +440,18 @@ class SchematicConnectivityAuthoringService:
 
         content = self.active_schematic_file().read_text(encoding="utf-8", errors="ignore")
         obstacles = self.get_symbol_bboxes(content)
+        # Wires that already belong to another net are what this route must not
+        # merge with; the pins' own net is exempt so a partly drawn net can be
+        # extended to its remaining pins.
+        occupied = self.foreign_wire_segments(content, [start, end])
         segments, routing_warning = self.route_avoiding_obstacles(
             start,
             end,
             obstacles,
             payload.snap_to_grid,
+            occupied,
         )
+        crossings = self.count_net_crossings(segments, occupied)
         if not segments:
             return (
                 f"{payload.ref1}:{payload.pin1} and {payload.ref2}:{payload.pin2} already overlap."
@@ -453,10 +468,18 @@ class SchematicConnectivityAuthoringService:
 
         self.transactional_write(mutator, None)
         result = self.reload_schematic()
+        # A crossing is legal in KiCad -- no junction is placed -- so it is worth
+        # stating plainly rather than leaving the reader to squint at the render.
+        crossing_note = (
+            f"Note: the route crosses {crossings} other net(s) without connecting."
+            if crossings
+            else ""
+        )
         return (
             f"{result}\nRouted {len(segments)} wire segment(s) between "
             f"{payload.ref1}:{payload.pin1} and {payload.ref2}:{payload.pin2}."
             + (f"\n{routing_warning}" if routing_warning else "")
+            + (f"\n{crossing_note}" if crossing_note else "")
         )
 
     def add_missing_junctions(self) -> str:

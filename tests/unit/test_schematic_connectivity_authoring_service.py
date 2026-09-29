@@ -129,8 +129,9 @@ def _harness(
         end: tuple[float, float],
         obstacles: list[BoundingBoxLike],
         snap_to_grid: bool,
+        occupied: list[tuple[float, float, float, float]] | None = None,
     ) -> tuple[list[tuple[float, float, float, float]], str | None]:
-        calls.append(("route", (start, end, obstacles, snap_to_grid)))
+        calls.append(("route", (start, end, obstacles, snap_to_grid, occupied)))
         return list(route_segments or []), route_warning
 
     def split_lib_id(lib_id: str) -> tuple[str, str]:
@@ -160,6 +161,8 @@ def _harness(
         active_schematic_file=lambda: target.path,
         split_lib_id=split_lib_id,
         get_symbol_bboxes=lambda content: [FakeBoundingBox()],
+        foreign_wire_segments=lambda content, anchors: [],
+        count_net_crossings=lambda segments, occupied: 0,
         route_avoiding_obstacles=route,
         run_auto_add_missing_junctions=lambda: "Inserted 2 missing junction(s).",
         snap_tolerance_mm=0.001,
