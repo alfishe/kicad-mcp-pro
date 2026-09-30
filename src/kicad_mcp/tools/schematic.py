@@ -2659,7 +2659,7 @@ def _get_sheet_bboxes(sexpr_content: str) -> list[BBox]:
 #: Name token immediately after a ``(`` in the S-expression text.  No ``^``:
 #: ``Pattern.match(text, pos)`` already anchors at ``pos``, whereas ``^`` would
 #: keep matching only at the start of the whole document.
-_SEXPR_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_SEXPR_NAME_RE = re.compile(r"[A-Za-z_]\\w*", re.ASCII)
 #: A graphic rectangle's own corner pair, wherever it sits inside its block.
 _RECTANGLE_CORNERS_RE = re.compile(
     r"\(start\s+(-?[\d.]+)\s+(-?[\d.]+)\)\s*\(end\s+(-?[\d.]+)\s+(-?[\d.]+)\)"
