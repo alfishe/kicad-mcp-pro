@@ -2783,6 +2783,20 @@ def _module_boundary_edges(
     )
 
 
+def _placed_symbol_bbox(symbol: dict[str, Any]) -> BBox:
+    """Resolve one placed symbol's primitive bounds with parser fallback."""
+    x = float(symbol.get("x", symbol.get("x_mm", 0.0)) or 0.0)
+    y = float(symbol.get("y", symbol.get("y_mm", 0.0)) or 0.0)
+    lib_id = str(symbol.get("lib_id", "") or "")
+    rotation = int(round(float(symbol.get("rotation", 0.0) or 0.0)))
+    unit = int(symbol.get("unit", 1) or 1)
+    bounds = None
+    if lib_id and ":" in lib_id:
+        library, symbol_name = _split_lib_id(lib_id)
+        bounds = get_symbol_primitive_bounds(library, symbol_name, x, y, rotation, unit)
+    return BBox(*(bounds if bounds is not None else _symbol_bbox_bounds(symbol)))
+
+
 def _get_symbol_bboxes(sexpr_content: str) -> list[BBox]:
     symbols: list[dict[str, Any]] = []
     cursor = 0
@@ -2796,20 +2810,7 @@ def _get_symbol_bboxes(sexpr_content: str) -> list[BBox]:
                 cursor += length
                 continue
         cursor += 1
-    bboxes: list[BBox] = []
-    for symbol in symbols:
-        x = float(symbol.get("x", symbol.get("x_mm", 0.0)) or 0.0)
-        y = float(symbol.get("y", symbol.get("y_mm", 0.0)) or 0.0)
-        lib_id = str(symbol.get("lib_id", "") or "")
-        rotation = int(round(float(symbol.get("rotation", 0.0) or 0.0)))
-        unit = int(symbol.get("unit", 1) or 1)
-        bounds = None
-        if lib_id and ":" in lib_id:
-            library, symbol_name = _split_lib_id(lib_id)
-            bounds = get_symbol_primitive_bounds(library, symbol_name, x, y, rotation, unit)
-        if bounds is None:
-            bounds = _symbol_bbox_bounds(symbol)
-        bboxes.append(BBox(*bounds))
+    bboxes = [_placed_symbol_bbox(symbol) for symbol in symbols]
     # Hierarchical sheets occupy space too: a wire crossing one is as wrong as a
     # wire crossing a symbol, and a sheet pin needs its sheet's box to be found
     # by _owning_bbox before it can be given an escape stub.
