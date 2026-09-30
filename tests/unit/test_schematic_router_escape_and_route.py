@@ -391,10 +391,7 @@ def _deterministic_permutation(length: int, seed: int) -> list[int]:
     """Return a reproducible pseudo-shuffle without a security-sensitive PRNG."""
     return sorted(
         range(length),
-        key=lambda index: (
-            ((index + 1) * 0x9E3779B1) ^ ((seed + 1) * 0x85EBCA77)
-        )
-        & 0xFFFFFFFF,
+        key=lambda index: (((index + 1) * 0x9E3779B1) ^ ((seed + 1) * 0x85EBCA77)) & 0xFFFFFFFF,
     )
 
 
@@ -980,9 +977,7 @@ def test_independent_nets_survive_geometry_union(boxes_by_ref: dict[str, BBox]) 
         for attempt in range(_ORDER_ATTEMPTS):
             order = list(range(len(nets)))
             if attempt:
-                order = _deterministic_permutation(
-                    len(nets), seed * _ORDER_ATTEMPTS + attempt
-                )
+                order = _deterministic_permutation(len(nets), seed * _ORDER_ATTEMPTS + attempt)
             net_segments, refused = _route_batch(nets, boxes, order)
             distinct = _distinct_nets(net_segments)
             assert distinct == len(nets), (
