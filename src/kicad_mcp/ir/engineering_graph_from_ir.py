@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
-from .circuit_ir import IRCircuit, IRNet, IRPin
+from .circuit_ir import IRCircuit, IRComponent, IRNet, IRPin
 from .engineering_graph import (
     EngineeringGraph,
     GraphEdge,
@@ -16,6 +17,97 @@ from .engineering_graph import (
     NativeLink,
     canonical_entity_id,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class GraphIncrementalUpdateResult:
+    """Evidence returned by a bounded in-place IRCircuit → graph update."""
+
+    updated_entity_ids: frozenset[str]
+    preserved_entity_ids: frozenset[str]
+    work_units: int
+
+
+def update_graph_from_circuit(
+    graph: EngineeringGraph,
+    before: IRCircuit,
+    after: IRCircuit,
+) -> GraphIncrementalUpdateResult:
+    """Apply supported identity-preserving IRCircuit edits without rebuilding the graph.
+
+    The first bounded contract intentionally supports component attribute edits only.
+    Structural component/pin changes and all net/rail/interface/constraint changes
+    require an explicit full rebuild rather than hiding whole-graph reconstruction
+    behind an "incremental" API.
+    """
+    if _project_state(before) != _project_state(after):
+        raise ValueError("project metadata changed; full Engineering Graph rebuild required")
+    if set(before.components) != set(after.components):
+        raise ValueError("component identity set changed; full Engineering Graph rebuild required")
+    if (
+        before.nets != after.nets
+        or before.power_rails != after.power_rails
+        or before.interfaces != after.interfaces
+        or before.constraints != after.constraints
+    ):
+        raise ValueError(
+            "non-component circuit state changed; full Engineering Graph rebuild required"
+        )
+
+    changed_references = [
+        reference
+        for reference in sorted(before.components)
+        if before.components[reference] != after.components[reference]
+    ]
+    for reference in changed_references:
+        if before.components[reference].pins != after.components[reference].pins:
+            raise ValueError(
+                "component pin structure changed; full Engineering Graph rebuild required"
+            )
+
+    imported = _imported_provenance()
+    updates: list[GraphEntity] = []
+    for reference in changed_references:
+        before_entity = _component_entity(
+            graph.project_key,
+            reference,
+            before.components[reference],
+            imported,
+        )
+        existing = graph.entities.get(before_entity.entity_id)
+        if existing != before_entity:
+            raise ValueError(
+                f"component {reference!r} does not match the declared before-state; "
+                "full Engineering Graph rebuild required"
+            )
+        updates.append(
+            _component_entity(
+                graph.project_key,
+                reference,
+                after.components[reference],
+                imported,
+            )
+        )
+
+    updated_entity_ids = {entity.entity_id for entity in updates}
+    for entity in updates:
+        graph.entities[entity.entity_id] = entity
+
+    preserved_entity_ids = frozenset(set(graph.entities) - updated_entity_ids)
+    return GraphIncrementalUpdateResult(
+        updated_entity_ids=frozenset(updated_entity_ids),
+        preserved_entity_ids=preserved_entity_ids,
+        work_units=len(updated_entity_ids),
+    )
+
+
+def _project_state(circuit: IRCircuit) -> tuple[object, ...]:
+    return (
+        circuit.source_path,
+        circuit.source_uuid,
+        circuit.title,
+        circuit.sheet_hierarchy,
+    )
 
 
 def graph_from_circuit(
@@ -121,22 +213,7 @@ def _add_components(
     for reference, component in sorted(circuit.components.items()):
         component_id = canonical_entity_id(project_key, GraphEntityKind.COMPONENT, reference)
         component_ids[reference] = component_id
-        graph.add_entity(
-            GraphEntity(
-                component_id,
-                GraphEntityKind.COMPONENT,
-                reference,
-                {
-                    "lib_id": component.lib_id,
-                    "value": component.value,
-                    "footprint": component.footprint,
-                    "dnp": component.dnp,
-                    "in_bom": component.in_bom,
-                },
-                imported,
-                (NativeLink("kicad", "symbol_reference", reference),),
-            )
-        )
+        graph.add_entity(_component_entity(project_key, reference, component, imported))
         graph.add_edge(GraphEdge(project_id, component_id, GraphEdgeKind.CONTAINS))
         _add_component_pins(
             graph,
@@ -148,6 +225,29 @@ def _add_components(
             pin_ids,
         )
     return component_ids, pin_ids
+
+
+def _component_entity(
+    project_key: str,
+    reference: str,
+    component: IRComponent,
+    imported: GraphProvenance,
+) -> GraphEntity:
+    component_id = canonical_entity_id(project_key, GraphEntityKind.COMPONENT, reference)
+    return GraphEntity(
+        component_id,
+        GraphEntityKind.COMPONENT,
+        reference,
+        {
+            "lib_id": component.lib_id,
+            "value": component.value,
+            "footprint": component.footprint,
+            "dnp": component.dnp,
+            "in_bom": component.in_bom,
+        },
+        imported,
+        (NativeLink("kicad", "symbol_reference", reference),),
+    )
 
 
 def _add_component_pins(

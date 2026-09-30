@@ -16,6 +16,8 @@ from kicad_mcp.ir import (
     IRNet,
     IRPin,
     IRPowerRail,
+    graph_from_circuit,
+    update_graph_from_circuit,
 )
 from kicad_mcp.ir.engineering_graph import (
     DRAFT_ENGINEERING_GRAPH_SCHEMA_VERSION,
@@ -31,7 +33,6 @@ from kicad_mcp.ir.engineering_graph import (
     canonical_entity_id,
     engineering_graph_diff,
 )
-from kicad_mcp.ir.engineering_graph_from_ir import graph_from_circuit
 
 
 def _entity(
@@ -102,6 +103,117 @@ def test_graph_ids_survive_equivalent_ir_rebuild_and_path_change() -> None:
     assert first.entities_of_kind(GraphEntityKind.COMPONENT)[0].stable_key == "U7"
 
 
+def test_incremental_component_update_preserves_unrelated_graph_subtree() -> None:
+    before = _sample_circuit()
+    before.components["U8"] = IRComponent(
+        "U8",
+        "Device:R",
+        "10k",
+        "Resistor_SMD:R_0603_1608Metric",
+        pins=(IRPin("1", "1"), IRPin("2", "2")),
+    )
+    after = _sample_circuit()
+    after.components["U8"] = before.components["U8"]
+    after.components["U7"] = replace(after.components["U7"], value="STM32H5")
+
+    graph = graph_from_circuit(before)
+    u7_id = canonical_entity_id(graph.project_key, GraphEntityKind.COMPONENT, "U7")
+    u8_id = canonical_entity_id(graph.project_key, GraphEntityKind.COMPONENT, "U8")
+    u8_before = graph.entity(u8_id)
+    u8_pin_ids = {
+        entity.entity_id
+        for entity in graph.entities_of_kind(GraphEntityKind.PIN)
+        if entity.stable_key.startswith("U8:")
+    }
+
+    result = update_graph_from_circuit(graph, before, after)
+    clean_rebuild = graph_from_circuit(after)
+
+    assert result.updated_entity_ids == frozenset({u7_id})
+    assert result.work_units == 1
+    assert u8_id in result.preserved_entity_ids
+    assert u8_pin_ids <= result.preserved_entity_ids
+    assert graph.entity(u8_id) is u8_before
+    updated_u7 = graph.entity(u7_id)
+    assert updated_u7 is not None
+    assert updated_u7.attributes["value"] == "STM32H5"
+    assert engineering_graph_diff(graph, clean_rebuild) == []
+
+
+def test_incremental_update_preconditions_fail_without_partial_mutation() -> None:
+    before = _sample_circuit()
+    before.components["U8"] = IRComponent(
+        "U8",
+        "Device:R",
+        "10k",
+        "Resistor_SMD:R_0603_1608Metric",
+    )
+    after = _sample_circuit()
+    after.components["U7"] = replace(after.components["U7"], value="STM32H5")
+    after.components["U8"] = replace(before.components["U8"], value="22k")
+
+    graph = graph_from_circuit(before)
+    u7_id = canonical_entity_id(graph.project_key, GraphEntityKind.COMPONENT, "U7")
+    u8_id = canonical_entity_id(graph.project_key, GraphEntityKind.COMPONENT, "U8")
+    u7_before = graph.entity(u7_id)
+    u8_before = graph.entity(u8_id)
+    assert u8_before is not None
+    graph.entities[u8_id] = replace(u8_before, attributes={"value": "stale"})
+
+    with pytest.raises(ValueError, match="does not match the declared before-state"):
+        update_graph_from_circuit(graph, before, after)
+
+    assert graph.entity(u7_id) is u7_before
+
+
+def test_incremental_update_rejects_project_metadata_change() -> None:
+    before = _sample_circuit()
+    after = _sample_circuit()
+    after.title = "renamed"
+    graph = graph_from_circuit(before)
+
+    with pytest.raises(ValueError, match="project metadata changed"):
+        update_graph_from_circuit(graph, before, after)
+
+
+def test_incremental_update_rejects_net_state_change() -> None:
+    before = _sample_circuit()
+    after = _sample_circuit()
+    after.nets["USB_DP"] = replace(after.nets["USB_DP"], net_class="USB")
+    graph = graph_from_circuit(before)
+
+    with pytest.raises(ValueError, match="non-component circuit state changed"):
+        update_graph_from_circuit(graph, before, after)
+
+
+def test_incremental_update_rejects_component_pin_structure_change() -> None:
+    before = _sample_circuit()
+    after = _sample_circuit()
+    after.components["U7"] = replace(
+        after.components["U7"],
+        pins=(*after.components["U7"].pins, IRPin("3", "USB_DN")),
+    )
+    graph = graph_from_circuit(before)
+
+    with pytest.raises(ValueError, match="component pin structure changed"):
+        update_graph_from_circuit(graph, before, after)
+
+
+def test_incremental_update_rejects_structural_changes_instead_of_rebuilding() -> None:
+    before = _sample_circuit()
+    after = _sample_circuit()
+    after.components["U8"] = IRComponent(
+        "U8",
+        "Device:R",
+        "10k",
+        "Resistor_SMD:R_0603_1608Metric",
+    )
+    graph = graph_from_circuit(before)
+
+    with pytest.raises(ValueError, match="full Engineering Graph rebuild required"):
+        update_graph_from_circuit(graph, before, after)
+
+
 def test_graph_from_circuit_preserves_semantic_entities_and_native_links() -> None:
     graph = graph_from_circuit(_sample_circuit())
 
@@ -128,6 +240,69 @@ def test_adapter_requires_explicit_project_identity_without_source_uuid() -> Non
 
     graph = graph_from_circuit(circuit, project_key="fixture-project")
     assert graph.project_key == "fixture-project"
+
+
+def test_requirement_net_interface_verification_evidence_chain_is_queryable() -> None:
+    graph = EngineeringGraph(project_key="demo-project")
+    component = _entity(graph, GraphEntityKind.COMPONENT, "U7")
+    net = _entity(graph, GraphEntityKind.NET, "USB_DP")
+    interface = _entity(graph, GraphEntityKind.INTERFACE, "USB")
+    requirement = _entity(graph, GraphEntityKind.REQUIREMENT, "REQ-USB-001")
+    verification = _entity(graph, GraphEntityKind.VERIFICATION_RUN, "verify-usb-001")
+    evidence = _entity(graph, GraphEntityKind.EVIDENCE_ARTIFACT, "usb-drc.json")
+
+    graph.add_edge(GraphEdge(requirement.entity_id, component.entity_id, GraphEdgeKind.APPLIES_TO))
+    graph.add_edge(GraphEdge(requirement.entity_id, net.entity_id, GraphEdgeKind.APPLIES_TO))
+    graph.add_edge(GraphEdge(requirement.entity_id, interface.entity_id, GraphEdgeKind.APPLIES_TO))
+    graph.add_edge(
+        GraphEdge(
+            verification.entity_id,
+            requirement.entity_id,
+            GraphEdgeKind.DEPENDS_ON,
+        )
+    )
+    graph.add_edge(GraphEdge(verification.entity_id, evidence.entity_id, GraphEdgeKind.PRODUCES))
+
+    assert graph.dependencies_of(requirement.entity_id) == {
+        component.entity_id,
+        interface.entity_id,
+        net.entity_id,
+    }
+    assert {
+        requirement.entity_id,
+        verification.entity_id,
+        evidence.entity_id,
+    } <= graph.impacted_by({net.entity_id})
+
+
+def test_required_provenance_kinds_remain_distinct_across_persistence() -> None:
+    graph = EngineeringGraph(project_key="demo-project")
+    required_kinds = (
+        GraphProvenanceKind.IMPORTED,
+        GraphProvenanceKind.INFERRED,
+        GraphProvenanceKind.USER_APPROVED,
+        GraphProvenanceKind.TOOL_GENERATED,
+    )
+    for provenance_kind in required_kinds:
+        stable_key = f"provenance:{provenance_kind.value}"
+        graph.add_entity(
+            GraphEntity(
+                entity_id=canonical_entity_id(
+                    graph.project_key,
+                    GraphEntityKind.COMPONENT,
+                    stable_key,
+                ),
+                kind=GraphEntityKind.COMPONENT,
+                stable_key=stable_key,
+                provenance=GraphProvenance(provenance_kind, source="acceptance-test"),
+            )
+        )
+
+    restored = EngineeringGraph.from_document(graph.to_document())
+
+    assert {
+        entity.provenance.kind for entity in restored.entities_of_kind(GraphEntityKind.COMPONENT)
+    } == set(required_kinds)
 
 
 def test_u7_change_returns_requirement_contract_verification_and_evidence_impacts() -> None:
