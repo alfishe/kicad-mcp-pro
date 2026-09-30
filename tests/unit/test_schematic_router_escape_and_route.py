@@ -559,16 +559,26 @@ def _route_batch(
 # --------------------------------------------------------------------------- #
 # 1. primitive-accurate symbol extents
 # --------------------------------------------------------------------------- #
+def _assert_extent_is(
+    bounds: tuple[float, float, float, float] | None,
+    width: float,
+    height: float,
+) -> None:
+    """Both extent tests state the same thing, so they state it in one place."""
+    assert bounds is not None
+    x_min, y_min, x_max, y_max = bounds
+    assert x_max - x_min == pytest.approx(width, abs=1e-4)
+    assert y_max - y_min == pytest.approx(height, abs=1e-4)
+
+
 @pytest.mark.parametrize(("symbol", "width", "height"), FIXTURE_EXTENTS)
 def test_symbol_extent_matches_drawn_geometry(
     fixture_library: Path, symbol: str, width: float, height: float
 ) -> None:
     """Extents come from the symbol's graphics and pins, not a fixed guess."""
-    bounds = get_symbol_primitive_bounds("Fixture", symbol, 100.0, 100.0, 0, 1)
-    assert bounds is not None
-    x_min, y_min, x_max, y_max = bounds
-    assert x_max - x_min == pytest.approx(width, abs=1e-4)
-    assert y_max - y_min == pytest.approx(height, abs=1e-4)
+    _assert_extent_is(
+        get_symbol_primitive_bounds("Fixture", symbol, 100.0, 100.0, 0, 1), width, height
+    )
 
 
 def test_capacitor_extent_covers_plates_beyond_its_collinear_pins(
@@ -1110,11 +1120,9 @@ def test_real_library_extent_matches_drawn_geometry(
     library: str, symbol: str, width: float, height: float
 ) -> None:
     """The shipped KiCad symbols produce the same tight extents."""
-    bounds = get_symbol_primitive_bounds(library, symbol, 100.0, 100.0, 0, 1)
-    assert bounds is not None
-    x_min, y_min, x_max, y_max = bounds
-    assert x_max - x_min == pytest.approx(width, abs=1e-4)
-    assert y_max - y_min == pytest.approx(height, abs=1e-4)
+    _assert_extent_is(
+        get_symbol_primitive_bounds(library, symbol, 100.0, 100.0, 0, 1), width, height
+    )
 
 
 @requires_kicad_library
