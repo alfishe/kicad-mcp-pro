@@ -4051,6 +4051,50 @@ def _escape_point(
     )
 
 
+def _router_grid_node(point: tuple[float, float], grid_mm: float) -> tuple[float, float]:
+    """Nearest node of the lattice the router actually searches on.
+
+    ``SchematicRouter`` quantises every node it visits with
+    ``round(point / grid_mm)``, so this is the only kind of coordinate that a
+    stitched stub can meet.
+    """
+    return (round(point[0] / grid_mm) * grid_mm, round(point[1] / grid_mm) * grid_mm)
+
+
+def _escape_stub(
+    pin: tuple[float, float],
+    node: tuple[float, float],
+    landing: tuple[float, float] | None = None,
+) -> list[tuple[float, float, float, float]]:
+    """Axis-aligned segments joining a pin to its grid node.
+
+    ``_escape_point`` works in millimetres and can land *between* two nodes -- a
+    pin at (10.0, 12.0) escapes to (8.73, 12.0) on a 1.27 mm lattice, which the
+    router immediately reads as (8.89, 11.43).  Stitching the stub to the raw
+    landing left the two ends 0.70 mm apart, and nothing checked that they met:
+    the result was a polyline with four free ends that renders exactly like a
+    route while being an open wire.
+
+    Snapping the landing straight onto the lattice would fix the meeting point
+    but bend the stub off the direction the pin escapes in, and that direction
+    is the one thing a wire leaving a pin has to respect.  So the offset is
+    taken out as a second, perpendicular step instead: out along the escape
+    direction, then across onto the node.  Which axis that is comes from the raw
+    landing, because that is the direction the pin actually left in.
+    """
+    if abs(pin[0] - node[0]) <= SNAP_TOLERANCE_MM and abs(pin[1] - node[1]) <= SNAP_TOLERANCE_MM:
+        return []
+    reference = landing if landing is not None else node
+    moved_along_x = abs(pin[0] - reference[0]) > SNAP_TOLERANCE_MM
+    corner = (node[0], pin[1]) if moved_along_x else (pin[0], node[1])
+    segments: list[tuple[float, float, float, float]] = []
+    if abs(pin[0] - corner[0]) > SNAP_TOLERANCE_MM or abs(pin[1] - corner[1]) > SNAP_TOLERANCE_MM:
+        segments.append((pin[0], pin[1], corner[0], corner[1]))
+    if abs(corner[0] - node[0]) > SNAP_TOLERANCE_MM or abs(corner[1] - node[1]) > SNAP_TOLERANCE_MM:
+        segments.append((corner[0], corner[1], node[0], node[1]))
+    return segments
+
+
 def _route_avoiding_obstacles(
     start: tuple[float, float],
     end: tuple[float, float],
@@ -4097,17 +4141,22 @@ def _route_avoiding_obstacles(
 
     grid = SCHEMATIC_GRID_MM
 
-    start_esc = (
+    # The escape landing is snapped onto the router's own lattice, because that
+    # is the only place a stitched stub can meet the run.  Off-grid here is an
+    # open wire, not a cosmetic difference -- see ``_escape_stub``.
+    start_landing = (
         _escape_point(start, start_owner, obstacles, occupied, grid, snap_to_grid)
         if start_owner is not None
         else start
     )
+    start_esc = _router_grid_node(start_landing, grid)
 
-    end_esc = (
+    end_landing = (
         _escape_point(end, end_owner, obstacles, occupied, grid, snap_to_grid)
         if end_owner is not None
         else end
     )
+    end_esc = _router_grid_node(end_landing, grid)
 
     router = SchematicRouter(
         grid_mm=grid,
@@ -4132,11 +4181,9 @@ def _route_avoiding_obstacles(
         return direct, "WARNING: obstacle_bypass_failed"
 
     full_segments: list[tuple[float, float, float, float]] = []
-    if start_esc != start:
-        full_segments.append((start[0], start[1], start_esc[0], start_esc[1]))
+    full_segments.extend(_escape_stub(start, start_esc, start_landing))
     full_segments.extend(routed)
-    if end_esc != end:
-        full_segments.append((end_esc[0], end_esc[1], end[0], end[1]))
+    full_segments.extend(_escape_stub(end_esc, end, end_landing))
     segments = _deduplicate_segments(full_segments)
     if _route_merges_with_occupied(segments, occupied):
         # An escape stub or a stitched end landed on another net's wire.  Report
