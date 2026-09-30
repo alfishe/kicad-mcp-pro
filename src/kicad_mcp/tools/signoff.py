@@ -18,6 +18,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
+from ..project.release_evidence_store import ProjectReleaseEvidenceResolution
 from .gates import GateOutcome, _combined_status
 
 SignoffVerdict = Literal["PASS", "FAIL", "BLOCKED", "EMPTY", "UNVERIFIED", "WARN"]
@@ -95,10 +96,53 @@ def _bind(keywords: set[str], outcomes: list[GateOutcome]) -> list[GateOutcome]:
     return bound or list(outcomes)
 
 
+def _apply_release_evidence(
+    verdict: SignoffVerdict,
+    summary: str,
+    release_evidence: ProjectReleaseEvidenceResolution | None,
+) -> tuple[SignoffVerdict, str, dict[str, Any] | None]:
+    if release_evidence is None or not release_evidence.adopted:
+        return verdict, summary, None
+
+    contracts = (
+        [
+            {
+                "contract_id": result.contract_id,
+                "contract_version": result.contract_version,
+                "state": result.state.value,
+                "evidence_ids": list(result.evidence_ids),
+                "reason_codes": list(result.reason_codes),
+            }
+            for result in release_evidence.gate.contracts
+        ]
+        if release_evidence.gate is not None
+        else []
+    )
+    payload: dict[str, Any] = {
+        "approved": release_evidence.approved,
+        "errors": list(release_evidence.errors),
+        "contracts": contracts,
+    }
+
+    if not release_evidence.approved:
+        release_blocker = (
+            "Sign-off blocked: release-blocking HardwareIntentContract evidence "
+            "is missing, stale, invalidated, or unresolved."
+        )
+        combined_summary = release_blocker if verdict == "PASS" else f"{summary} {release_blocker}"
+        return "FAIL", combined_summary, payload
+
+    if release_evidence.gate is not None and release_evidence.gate.waived and verdict == "PASS":
+        return "WARN", "Sign-off requires explicit reviewed contract waiver evidence.", payload
+
+    return verdict, summary, payload
+
+
 def build_signoff_report(
     intent: dict[str, Any],
     outcomes: list[GateOutcome],
     provenance: dict[str, Any],
+    release_evidence: ProjectReleaseEvidenceResolution | None = None,
 ) -> dict[str, Any]:
     """Build the structured sign-off report. Deterministic: no timestamps inside."""
     gate_status = _combined_status(outcomes) if outcomes else "EMPTY"
@@ -132,6 +176,12 @@ def build_signoff_report(
         verdict = "PASS"
         summary = f"All {len(specs)} declared requirement(s) bound to passing checks."
 
+    verdict, summary, release_payload = _apply_release_evidence(
+        verdict,
+        summary,
+        release_evidence,
+    )
+
     checks = [
         {"name": o.name, "status": o.status, "summary": o.summary, "evidence": list(o.details)}
         for o in outcomes
@@ -143,6 +193,8 @@ def build_signoff_report(
         "checks": checks,
         "provenance": provenance,
     }
+    if release_payload is not None:
+        body["release_evidence"] = release_payload
     body["content_hash"] = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
     return body
 
@@ -165,6 +217,19 @@ def render_signoff_report(report: dict[str, Any]) -> str:
     lines.extend(["", "Checks:"])
     for check in report["checks"]:
         lines.append(f"  [{check['status']}] {check['name']} — {check['summary']}")
+    release_evidence = report.get("release_evidence")
+    if release_evidence is not None:
+        lines.extend(["", "Release contract evidence:"])
+        lines.append(f"  approved: {release_evidence['approved']}")
+        for contract in release_evidence["contracts"]:
+            lines.append(
+                "  "
+                + f"[{contract['state']}] {contract['contract_id']}@{contract['contract_version']}"
+            )
+            if contract["reason_codes"]:
+                lines.append("      reasons: " + ", ".join(contract["reason_codes"]))
+        for error in release_evidence["errors"]:
+            lines.append(f"  ERROR: {error}")
     prov = report["provenance"]
     lines.extend(
         [
