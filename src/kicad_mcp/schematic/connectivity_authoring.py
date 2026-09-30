@@ -64,6 +64,11 @@ LABEL_KIND_TO_BLOCK_KIND: dict[str, str] = {
 }
 
 
+def _no_module_boundaries(_content: str) -> list[BoundingBoxLike]:
+    """No drawn boundaries to clear -- the default for callers predating the rule."""
+    return []
+
+
 @dataclass(frozen=True)
 class SchematicConnectivityAuthoringService:
     """Author and repair schematic connectivity without depending on FastMCP."""
@@ -108,11 +113,23 @@ class SchematicConnectivityAuthoringService:
             list[BoundingBoxLike],
             bool,
             list[WireSegment] | None,
+            tuple[float, float] | None,
+            tuple[float, float] | None,
+            list[BoundingBoxLike] | None,
         ],
         tuple[list[WireSegment], str | None],
     ]
+    get_pin_outward_normals: Callable[
+        [str, str, int, int],
+        dict[str, tuple[float, float]],
+    ]
     run_auto_add_missing_junctions: Callable[[], str]
     snap_tolerance_mm: float
+    #: Drawn rectangles a route must not travel alongside -- hierarchical sheets
+    #: and bare rectangles around a self-contained block.  Not solid: a wire still
+    #: has to cross one to reach a pin inside it.  Defaults to none so a caller
+    #: that predates the rule keeps working; only wire routing consults it.
+    get_module_boundaries: Callable[[str], list[BoundingBoxLike]] = _no_module_boundaries
 
     def add_pin_labels(
         self,
@@ -405,7 +422,15 @@ class SchematicConnectivityAuthoringService:
             snap_to_grid=snap_to_grid,
         )
         data = self.parse_schematic(self.active_schematic_file())
-        symbols = {symbol["reference"]: symbol for symbol in data["symbols"]}
+        # Power symbols are addressable routing endpoints too.  They live in a
+        # separate list because they are excluded from BOM/annotation/placement,
+        # not because they cannot carry a wire -- and a pin's own ground stub is
+        # usually the only way to reach its net on a sheet.  The sibling tools
+        # (move/delete/modify_property) already resolve ``#PWR`` references, so
+        # the router not seeing them was an inconsistency, not a guard.
+        symbols = {
+            symbol["reference"]: symbol for symbol in [*data["symbols"], *data["power_symbols"]]
+        }
         first = symbols.get(payload.ref1)
         second = symbols.get(payload.ref2)
         if first is None:
@@ -438,8 +463,19 @@ class SchematicConnectivityAuthoringService:
         if end is None:
             return f"Pin {payload.pin2} was not found on {payload.ref2}."
 
+        # The direction each wire must leave and reach its pin in.  Without this
+        # the search may leave a pin sideways for free, which turns at the pin
+        # and lets two same-length candidates tie on cost.
+        start_normal = self.get_pin_outward_normals(
+            first_library, first_symbol, int(first["rotation"]), int(first["unit"])
+        ).get(payload.pin1)
+        end_normal = self.get_pin_outward_normals(
+            second_library, second_symbol, int(second["rotation"]), int(second["unit"])
+        ).get(payload.pin2)
+
         content = self.active_schematic_file().read_text(encoding="utf-8", errors="ignore")
         obstacles = self.get_symbol_bboxes(content)
+        boundaries = self.get_module_boundaries(content)
         # Wires that already belong to another net are what this route must not
         # merge with; the pins' own net is exempt so a partly drawn net can be
         # extended to its remaining pins.
@@ -450,6 +486,9 @@ class SchematicConnectivityAuthoringService:
             obstacles,
             payload.snap_to_grid,
             occupied,
+            start_normal,
+            end_normal,
+            boundaries,
         )
         crossings = self.count_net_crossings(segments, occupied)
         if not segments:

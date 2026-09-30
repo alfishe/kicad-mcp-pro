@@ -67,6 +67,10 @@ from ..schematic.semantic_ir import (
     FindingLike,
     SchematicSemanticIRService,
 )
+from ..schematic.sheet_pins import (
+    outward_normal_for_rotation,
+    parse_sheet_blocks,
+)
 from ..schematic.symbol_mutation import SchematicSymbolMutationService
 from ..schematic.template_catalog import SchematicTemplateCatalogService
 from ..schematic.template_instantiation import SchematicTemplateInstantiationService
@@ -77,8 +81,11 @@ from ..utils.geometry import Box as GeoBox
 from ..utils.geometry import body_box_from_pins, text_extent
 from ..utils.schematic_roundtrip import dropped_nodes
 from ..utils.schematic_router import (
+    PinOrientation,
     RouterBBox,
     SchematicRouter,
+    hugs_boundary,
+    module_boundary_edges,
     perpendicular_crossing,
     point_on_segment,
     segments_merge,
@@ -2541,6 +2548,163 @@ def get_symbol_primitive_bounds(
     return (round(min(xs), 4), round(min(ys), 4), round(max(xs), 4), round(max(ys), 4))
 
 
+def get_sheet_pin_outward_normals(
+    content: str,
+) -> dict[tuple[float, float], tuple[float, float]]:
+    """Direction a wire leaves each hierarchical sheet pin in.
+
+    Sheet pins live in ``(sheet ...)`` blocks, so ``get_pin_outward_normals`` --
+    which resolves a library symbol -- never sees them, and the router had no
+    grain to work from.  A sheet pin's rotation already says which edge of the
+    sheet it sits on, and the sheet's own rectangle says which way that edge
+    faces, so the direction is read rather than guessed.
+
+    Keyed by pin coordinate because that is how a caller routing to a sheet pin
+    holds it -- sheet pins have no ``reference`` to look a symbol up by.
+    """
+    normals: dict[tuple[float, float], tuple[float, float]] = {}
+    for sheet in parse_sheet_blocks(content):
+        for pin in sheet.pins:
+            normal = outward_normal_for_rotation(pin.rotation)
+            if normal is not None:
+                normals[(round(pin.x_mm, 3), round(pin.y_mm, 3))] = normal
+    return normals
+
+
+def _get_sheet_bboxes(sexpr_content: str) -> list[BBox]:
+    """Hierarchical sheet rectangles, as routing keepouts.
+
+    A sheet block is not a symbol, so it never reached ``_get_symbol_bboxes`` and
+    the router treated a sheet's rectangle as empty space -- it would run a wire
+    straight through one, and ``_owning_bbox`` would find no owner for a pin
+    sitting on the sheet's edge, which is what left sheet pins without an escape
+    stub (and therefore without a usable outward direction).
+
+    Sheet pins sit *on* these edges, exactly as symbol pins sit on their
+    keepout outline, so the existing interior-penetration rule already lets a
+    route reach them while refusing to pass through.
+    """
+    boxes: list[BBox] = []
+    for sheet in parse_sheet_blocks(sexpr_content):
+        origin_x, origin_y = sheet.origin
+        width, height = sheet.size
+        if width <= 0 or height <= 0:
+            continue
+        boxes.append(BBox(origin_x, origin_y, origin_x + width, origin_y + height))
+    return boxes
+
+
+#: Name token immediately after a ``(`` in the S-expression text.  No ``^``:
+#: ``Pattern.match(text, pos)`` already anchors at ``pos``, whereas ``^`` would
+#: keep matching only at the start of the whole document.
+_SEXPR_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+#: A graphic rectangle's own corner pair, wherever it sits inside its block.
+_RECTANGLE_CORNERS_RE = re.compile(
+    r"\(start\s+(-?[\d.]+)\s+(-?[\d.]+)\)\s*\(end\s+(-?[\d.]+)\s+(-?[\d.]+)\)"
+)
+
+
+def _matching_paren(content: str, open_index: int) -> int:
+    """Index of the ``)`` closing the ``(`` at ``open_index``, or ``-1``.
+
+    Quoted strings are skipped so a paren inside a label or a title never
+    unbalances the count.
+    """
+    depth = 0
+    index = open_index
+    length = len(content)
+    while index < length:
+        character = content[index]
+        if character == '"':
+            index += 1
+            while index < length and content[index] != '"':
+                if content[index] == "\\":
+                    index += 1
+                index += 1
+            index += 1
+            continue
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return -1
+
+
+def _sheet_graphic_rectangles(
+    sexpr_content: str,
+) -> list[tuple[float, float, float, float]]:
+    """Bare rectangles drawn directly on the sheet, as ``(x1, y1, x2, y2)``.
+
+    A designer draws one of these to fence off a circuit that belongs together
+    -- the reference sheet wraps its energy-measurement block in one -- and a
+    wire that then runs along the rectangle's edge defeats the drawing: it reads
+    as the block's own border rather than as a connection.
+
+    Only items at the sheet's own nesting level count.  ``(rectangle ...)`` is
+    also the token for every symbol's body outline, several hundred of them, and
+    those are already covered by the symbol keepout.
+    """
+    item_depth = 2  # 1 is ``(kicad_sch`` itself, so its children are at 2
+    rectangles: list[tuple[float, float, float, float]] = []
+    depth = 0
+    index = 0
+    length = len(sexpr_content)
+    while index < length:
+        character = sexpr_content[index]
+        if character == '"':
+            index += 1
+            while index < length and sexpr_content[index] != '"':
+                if sexpr_content[index] == "\\":
+                    index += 1
+                index += 1
+            index += 1
+            continue
+        if character != "(":
+            if character == ")":
+                depth -= 1
+            index += 1
+            continue
+        open_index = index
+        depth += 1
+        index += 1
+        name = _SEXPR_NAME_RE.match(sexpr_content, index)
+        if name is not None and depth == item_depth and name.group(0) == "rectangle":
+            close_index = _matching_paren(sexpr_content, open_index)
+            if close_index > 0:
+                corners = _RECTANGLE_CORNERS_RE.search(sexpr_content[open_index : close_index + 1])
+                if corners is not None:
+                    x1, y1, x2, y2 = (float(value) for value in corners.groups())
+                    rectangles.append((min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)))
+    return rectangles
+
+
+def _get_module_boundaries(sexpr_content: str) -> list[BBox]:
+    """Rectangles the router must not run alongside.
+
+    Two kinds of drawn boundary mean the same thing to a reader -- "this is a
+    block of its own": a hierarchical sheet's rectangle, and a bare rectangle
+    drawn around a circuit.  Neither is solid to the router, because both have
+    pins inside them that wires have to reach; what is refused is a run that
+    travels *along* an edge rather than crossing it.
+    """
+    boundaries = list(_get_sheet_bboxes(sexpr_content))
+    boundaries.extend(
+        BBox(x1, y1, x2, y2) for x1, y1, x2, y2 in _sheet_graphic_rectangles(sexpr_content)
+    )
+    return boundaries
+
+
+def _module_boundary_edges(
+    boundaries: list[BBox] | None,
+) -> list[tuple[bool, float, float, float]]:
+    return module_boundary_edges(
+        (box.x_min, box.y_min, box.x_max, box.y_max) for box in boundaries or []
+    )
+
+
 def _get_symbol_bboxes(sexpr_content: str) -> list[BBox]:
     symbols: list[dict[str, Any]] = []
     cursor = 0
@@ -2568,6 +2732,10 @@ def _get_symbol_bboxes(sexpr_content: str) -> list[BBox]:
         if bounds is None:
             bounds = _symbol_bbox_bounds(symbol)
         bboxes.append(BBox(*bounds))
+    # Hierarchical sheets occupy space too: a wire crossing one is as wrong as a
+    # wire crossing a symbol, and a sheet pin needs its sheet's box to be found
+    # by _owning_bbox before it can be given an escape stub.
+    bboxes.extend(_get_sheet_bboxes(sexpr_content))
     return bboxes
 
 
@@ -3276,6 +3444,9 @@ def _extract_pin_records(block: str) -> list[dict[str, Any]]:
             {
                 "x": float(at_match.group(1)),
                 "y": float(at_match.group(2)),
+                # KiCad's pin angle points from the connection point toward the
+                # symbol body, so a wire leaves at ``orientation + 180``.
+                "orientation": float(at_match.group(3)),
                 "name": name_match.group(1) if name_match else "",
                 "number": number_match.group(1),
                 "etype": etype_match.group(1) if etype_match else "unspecified",
@@ -3869,6 +4040,81 @@ def _owning_bbox(point: tuple[float, float], obstacles: list[BBox]) -> BBox | No
     return None
 
 
+def _grid_step(normal: tuple[float, float] | None) -> tuple[int, int] | None:
+    """Snap an outward unit normal onto the router's four grid directions."""
+    if normal is None:
+        return None
+    dx, dy = normal
+    if abs(dx) >= abs(dy) and abs(dx) > SNAP_TOLERANCE_MM:
+        return (1, 0) if dx > 0 else (-1, 0)
+    if abs(dy) > SNAP_TOLERANCE_MM:
+        return (0, 1) if dy > 0 else (0, -1)
+    return None
+
+
+def _place_normal(dx: float, dy: float, rotation: int, mirror: str = "") -> tuple[float, float]:
+    """Map a symbol-space direction to schematic space, as ``_place_pin`` does.
+
+    Kept next to ``_place_pin`` so a pin's position and its direction can never
+    drift apart.
+    """
+    rx, ry = rotate_point(dx, -dy, -rotation)
+    if mirror == "x":
+        ry = -ry
+    elif mirror == "y":
+        rx = -rx
+    return (round(rx, 4), round(ry, 4))
+
+
+def _pin_record_normal(record: dict[str, Any], rotation: int, mirror: str) -> tuple[float, float]:
+    orientation = float(record.get("orientation", 0.0))
+    ox, oy = rotate_point(1.0, 0.0, orientation + 180.0)
+    return _place_normal(ox, oy, rotation, mirror)
+
+
+def get_pin_outward_normals(
+    library: str,
+    symbol_name: str,
+    rotation: int = 0,
+    unit: int = 1,
+    mirror: str = "",
+) -> dict[str, tuple[float, float]]:
+    """Direction a wire leaves each pin in, in schematic space.
+
+    Real data from the symbol definition -- the pin's ``(at x y angle)`` -- not a
+    guess from the keepout box.  The nearest-edge heuristic agrees with it only
+    while the pin sits on its symbol's perimeter, a precondition the tests
+    already flag as fragile: a graphic overhanging a pin by more than one grid
+    unit picks the wrong edge, and a pin whose symbol is drawn asymmetrically
+    can too.
+    """
+    sym_file = _symbol_library_file(library)
+    if sym_file is None:
+        return {}
+
+    content = sym_file.read_text(encoding="utf-8", errors="ignore")
+    blocks = _collect_symbol_blocks(content, symbol_name)
+    if not blocks:
+        return {}
+    available_units = _available_units_from_blocks(blocks)
+    if available_units and unit not in available_units:
+        return {}
+
+    normals: dict[str, tuple[float, float]] = {}
+    for block in blocks:
+        for record in _extract_pin_records(_strip_child_symbol_blocks(block)):
+            normals[record["number"]] = _pin_record_normal(record, rotation, mirror)
+        block_name = _symbol_block_name(block)
+        if block_name is None:
+            continue
+        for child_name, child_block in _extract_child_symbol_blocks(block):
+            if not child_name.startswith((f"{block_name}_{unit}_", f"{block_name}_0_")):
+                continue
+            for record in _extract_pin_records(child_block):
+                normals[record["number"]] = _pin_record_normal(record, rotation, mirror)
+    return normals
+
+
 def _escape_direction(point: tuple[float, float], owner: BBox) -> tuple[float, float]:
     """Outward unit vector for a pin's 1-grid escape stub.
 
@@ -4013,6 +4259,7 @@ def _escape_point(
     occupied: list[tuple[float, float, float, float]] | None,
     grid_mm: float,
     snap_to_grid: bool,
+    normal: tuple[float, float] | None = None,
 ) -> tuple[float, float]:
     """First free landing spot for a pin's escape stub.
 
@@ -4027,7 +4274,7 @@ def _escape_point(
     Falling back to the plain outward normal keeps an impossible escape visible
     downstream instead of hiding it.
     """
-    primary = _escape_direction(point, owner)
+    primary = normal if normal is not None else _escape_direction(point, owner)
     edges = ((-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0))
     distances = range(1, MAX_ESCAPE_GRID + 1)
     attempts = [(primary, distance) for distance in distances]
@@ -4049,6 +4296,20 @@ def _escape_point(
     return _snap_point(
         point[0] + primary[0] * grid_mm, point[1] + primary[1] * grid_mm, snap_to_grid
     )
+
+
+def _unit_step(delta: tuple[float, float]) -> tuple[int, int] | None:
+    """Reduce a segment delta to the grid direction it travels."""
+    dx, dy = delta
+    if abs(dx) <= SNAP_TOLERANCE_MM and abs(dy) <= SNAP_TOLERANCE_MM:
+        return None
+    if abs(dx) >= abs(dy):
+        return (1, 0) if dx > 0 else (-1, 0)
+    return (0, 1) if dy > 0 else (0, -1)
+
+
+def _opposite_step(step: tuple[int, int] | None) -> tuple[int, int] | None:
+    return None if step is None else (-step[0], -step[1])
 
 
 def _router_grid_node(point: tuple[float, float], grid_mm: float) -> tuple[float, float]:
@@ -4095,12 +4356,40 @@ def _escape_stub(
     return segments
 
 
+def _route_avoids_pin_hinge(
+    segments: list[tuple[float, float, float, float]],
+    start_normal: tuple[float, float] | None,
+    end_normal: tuple[float, float] | None,
+) -> bool:
+    """True when a candidate run turns at either pin instead of leaving straight.
+
+    A wire leaves a pin along the pin's outward normal and arrives at the far
+    pin travelling against it.  A run that does either across the grain turns at
+    the pin -- a real bend in the finished wire.  The direct shortcut returns
+    without weighing alternatives, so it is only honest to take it when it does
+    not smuggle in that unpriced turn.
+    """
+    if not segments:
+        return False
+    first, last = segments[0], segments[-1]
+    wanted_start = _grid_step(start_normal)
+    wanted_arrival = _opposite_step(_grid_step(end_normal))
+    travelled_start = _unit_step((first[2] - first[0], first[3] - first[1]))
+    travelled_arrival = _unit_step((last[2] - last[0], last[3] - last[1]))
+    if wanted_start is not None and travelled_start != wanted_start:
+        return True
+    return wanted_arrival is not None and travelled_arrival != wanted_arrival
+
+
 def _route_avoiding_obstacles(
     start: tuple[float, float],
     end: tuple[float, float],
     obstacles: list[BBox],
     snap_to_grid: bool,
     occupied: list[tuple[float, float, float, float]] | None = None,
+    start_normal: tuple[float, float] | None = None,
+    end_normal: tuple[float, float] | None = None,
+    boundaries: list[BBox] | None = None,
 ) -> tuple[list[tuple[float, float, float, float]], str | None]:
     """Route orthogonal wire segments between two pins around obstacles.
 
@@ -4115,6 +4404,12 @@ def _route_avoiding_obstacles(
     not do is run along one, turn on one, or land an endpoint on one, since each
     of those makes KiCad union two nets into a silent short.
 
+    ``boundaries`` carries drawn rectangles that mean "a block of its own": a
+    hierarchical sheet, or a bare rectangle around a circuit.  They are not
+    solid either -- a wire has to cross one to reach a pin inside it -- but a run
+    that travels alongside an edge is refused, because it stops reading as a
+    connection and starts reading as the block's own border.
+
     When A* cannot find a route the direct run is returned together with an
     ``obstacle_bypass_failed`` warning.  That fallback may cross a keepout: it is
     a loud signal for the caller to resolve, not a usable route.  A route that
@@ -4123,6 +4418,9 @@ def _route_avoiding_obstacles(
     ``net_crossing_unavoidable``.
     """
     direct = _deduplicate_segments(_manhattan_segments(start, end, snap_to_grid))
+
+    grid = SCHEMATIC_GRID_MM
+    boundary_edges = _module_boundary_edges(boundaries)
 
     start_owner = _owning_bbox(start, obstacles)
     end_owner = _owning_bbox(end, obstacles)
@@ -4136,23 +4434,26 @@ def _route_avoiding_obstacles(
         and not _route_hits_keepouts(direct, obstacles, owners)
         and not _route_merges_with_occupied(direct, occupied)
         and not _net_crossings(direct, occupied)
+        and not _route_avoids_pin_hinge(direct, start_normal, end_normal)
+        and not any(
+            hugs_boundary(segment, boundary_edges, SchematicRouter.BOUNDARY_CLEARANCE * grid)
+            for segment in direct
+        )
     ):
         return direct, None
-
-    grid = SCHEMATIC_GRID_MM
 
     # The escape landing is snapped onto the router's own lattice, because that
     # is the only place a stitched stub can meet the run.  Off-grid here is an
     # open wire, not a cosmetic difference -- see ``_escape_stub``.
     start_landing = (
-        _escape_point(start, start_owner, obstacles, occupied, grid, snap_to_grid)
+        _escape_point(start, start_owner, obstacles, occupied, grid, snap_to_grid, start_normal)
         if start_owner is not None
         else start
     )
     start_esc = _router_grid_node(start_landing, grid)
 
     end_landing = (
-        _escape_point(end, end_owner, obstacles, occupied, grid, snap_to_grid)
+        _escape_point(end, end_owner, obstacles, occupied, grid, snap_to_grid, end_normal)
         if end_owner is not None
         else end
     )
@@ -4164,10 +4465,24 @@ def _route_avoiding_obstacles(
             RouterBBox(obstacle.x_min, obstacle.y_min, obstacle.x_max, obstacle.y_max)
             for obstacle in obstacles
         ],
-        max_steps=20000,
         occupied=list(occupied or []),
+        boundaries=[
+            RouterBBox(boundary.x_min, boundary.y_min, boundary.x_max, boundary.y_max)
+            for boundary in boundaries or []
+        ],
     )
-    routed = router.route(start_esc, end_esc, max_bends=MAX_ROUTE_BENDS)
+    routed = router.route(
+        start_esc,
+        end_esc,
+        max_bends=MAX_ROUTE_BENDS,
+        # A wire leaves a pin along its outward normal and arrives against the far
+        # pin's, so the two directions belong together.  The wire reaches
+        # ``end_esc`` heading back towards its pin, hence the opposite step.
+        orientation=PinOrientation(
+            start=_grid_step(start_normal),
+            goal=_opposite_step(_grid_step(end_normal)),
+        ),
+    )
     if routed is None:
         if (
             direct
@@ -6288,6 +6603,10 @@ def _load_layout_design_intent() -> FunctionalDesignIntentLike:
     return load_design_intent()
 
 
+def _connectivity_module_boundaries(content: str) -> list[BoundingBoxLike]:
+    return cast(list[BoundingBoxLike], _get_module_boundaries(content))
+
+
 def _connectivity_symbol_bboxes(content: str) -> list[BoundingBoxLike]:
     return cast(list[BoundingBoxLike], _get_symbol_bboxes(content))
 
@@ -6312,6 +6631,9 @@ def _connectivity_route_avoiding_obstacles(
     obstacles: list[BoundingBoxLike],
     snap_to_grid: bool,
     occupied: list[tuple[float, float, float, float]] | None = None,
+    start_normal: tuple[float, float] | None = None,
+    end_normal: tuple[float, float] | None = None,
+    boundaries: list[BoundingBoxLike] | None = None,
 ) -> tuple[list[tuple[float, float, float, float]], str | None]:
     return _route_avoiding_obstacles(
         start,
@@ -6319,6 +6641,9 @@ def _connectivity_route_avoiding_obstacles(
         cast(list[BBox], obstacles),
         snap_to_grid,
         occupied,
+        start_normal,
+        end_normal,
+        cast(list[BBox], boundaries) if boundaries else None,
     )
 
 
@@ -6695,8 +7020,10 @@ def _register_authoring(mcp: FastMCP) -> None:
         active_schematic_file=_get_schematic_file,
         split_lib_id=_split_lib_id,
         get_symbol_bboxes=_connectivity_symbol_bboxes,
+        get_module_boundaries=_connectivity_module_boundaries,
         foreign_wire_segments=_connectivity_foreign_wire_segments,
         count_net_crossings=_connectivity_net_crossings,
+        get_pin_outward_normals=get_pin_outward_normals,
         route_avoiding_obstacles=_connectivity_route_avoiding_obstacles,
         run_auto_add_missing_junctions=run_auto_add_missing_junctions,
         snap_tolerance_mm=SNAP_TOLERANCE_MM,

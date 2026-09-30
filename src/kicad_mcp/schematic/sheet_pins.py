@@ -386,6 +386,33 @@ def edge_for_rotation(rotation: int) -> str | None:
     return _ROTATION_TO_EDGE.get(rotation)
 
 
+_EDGE_OUTWARD: Final[dict[str, tuple[float, float]]] = {
+    "left": (-1.0, 0.0),
+    "right": (1.0, 0.0),
+    "top": (0.0, -1.0),
+    "bottom": (0.0, 1.0),
+}
+"""Unit vector pointing away from the sheet body for each edge.
+
+Schematic space has y increasing downwards, so the ``top`` edge faces -y.  A
+wire leaves a sheet pin along this vector and arrives travelling against it --
+the same grain contract symbol pins obey, which routing needs in order to place
+an escape stub outside the sheet rather than inside it.
+"""
+
+
+def outward_normal_for_rotation(rotation: int) -> tuple[float, float] | None:
+    """Direction a wire must leave a sheet pin in, or ``None`` if unrecognized.
+
+    Mirrors :func:`get_pin_outward_normals` for symbols: without this a router has
+    to guess the escape direction from the nearest edge of the pin's box, and a pin
+    sitting on that box's outline gives distance 0 to its own edge -- no usable
+    signal at all.
+    """
+    edge = edge_for_rotation(rotation)
+    return _EDGE_OUTWARD.get(edge) if edge else None
+
+
 @dataclass(frozen=True)
 class SheetPinPlacement:
     """One sheet pin, resolved to absolute schematic coordinates.

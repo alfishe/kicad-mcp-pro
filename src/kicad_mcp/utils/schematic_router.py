@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import heapq
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 Point = tuple[float, float]
@@ -121,6 +122,69 @@ def perpendicular_crossing(one: Segment, other: Segment, *, tolerance: float = _
     return False
 
 
+def module_boundary_edges(
+    rectangles: Iterable[tuple[float, float, float, float]],
+) -> list[tuple[bool, float, float, float]]:
+    """Each drawn rectangle as ``(is_vertical, fixed_coord, lo, hi)`` edges.
+
+    A module boundary is only ever met one edge at a time, so the sides are
+    flattened once here rather than rebuilt on every move of the search.
+    """
+    edges: list[tuple[bool, float, float, float]] = []
+    for x_min, y_min, x_max, y_max in rectangles:
+        edges.append((True, x_min, y_min, y_max))
+        edges.append((True, x_max, y_min, y_max))
+        edges.append((False, y_min, x_min, x_max))
+        edges.append((False, y_max, x_min, x_max))
+    return edges
+
+
+def hugs_boundary(
+    segment: Segment,
+    boundary_edges: Iterable[tuple[bool, float, float, float]],
+    clearance_mm: float,
+) -> bool:
+    """True when a run travels alongside a drawn boundary closer than clearance.
+
+    Only a *parallel* run can crowd a boundary.  Leaving a pin that sits on the
+    boundary, or crossing the boundary to reach a pin inside it, is
+    perpendicular and is exactly what the boundary is there to be crossed by,
+    so those moves are never refused.  A run that merely passes the corner of a
+    rectangle does not share its span and is likewise free.
+    """
+    x1, y1, x2, y2 = segment
+    if abs(x1 - x2) <= _EPS and abs(y1 - y2) <= _EPS:
+        return False
+    vertical = abs(x1 - x2) <= _EPS
+    if vertical:
+        fixed, lo, hi = x1, min(y1, y2), max(y1, y2)
+    else:
+        fixed, lo, hi = y1, min(x1, x2), max(x1, x2)
+    for edge_vertical, coord, edge_lo, edge_hi in boundary_edges:
+        if edge_vertical != vertical:
+            continue
+        if abs(fixed - coord) >= clearance_mm - _EPS:
+            continue
+        if min(hi, edge_hi) - max(lo, edge_lo) <= _EPS:
+            continue
+        return True
+    return False
+
+
+@dataclass(frozen=True)
+class PinOrientation:
+    """Directions a route must leave and arrive in, when the caller knows them.
+
+    Both come from the pins' outward normals, and they belong together: a route
+    that leaves a pin along its normal and arrives against the far pin's normal
+    is the shape a reader expects, and each is meaningless without the other.
+    Passing them as one value also keeps ``route``'s signature readable.
+    """
+
+    start: tuple[int, int] | None = None
+    goal: tuple[int, int] | None = None
+
+
 @dataclass(frozen=True)
 class RouterBBox:
     """Axis-aligned obstacle bounds in millimetres."""
@@ -138,23 +202,58 @@ class RouterBBox:
 class SchematicRouter:
     """A* schematic router with Manhattan movement and bend penalties."""
 
+    #: Spacing, in grid steps, that wires running alongside each other use in a
+    #: hand-drawn sheet.  Measured on the reference board: of the wires with a
+    #: parallel neighbour, 41 sit at 2 steps and none at 1, and 89% of all wire
+    #: length runs alongside something.  A reader follows a bundle; a wire one
+    #: step from its neighbour cannot be followed at all.
+    BUNDLE_PITCH = 2
+    #: A step running at BUNDLE_PITCH costs this fraction of a free step, so the
+    #: search will pay extra length to join a bundle rather than stand alone.
+    BUNDLE_DISCOUNT = 0.55
+    #: Expansions allowed before a route is reported unroutable.  A full A3 sheet
+    #: with routing channels needs more than the original budget.
+    MAX_STEPS = 20000
+    #: Closest a run may travel alongside a *drawn* boundary -- a hierarchical
+    #: sheet's rectangle, or a bare rectangle a designer drew to fence off a
+    #: self-contained block.  Measured on the reference sheet: no wire anywhere
+    #: on it runs parallel to such an edge nearer than 2 steps, and none sits on
+    #: one.  A wire hugging the edge reads as part of the drawing -- it stops
+    #: looking like a connection and starts looking like the block's own border.
+    BOUNDARY_CLEARANCE = 2
+
     def __init__(
         self,
         grid_mm: float = 2.54,
         obstacles: list[RouterBBox] | None = None,
-        max_steps: int = 20000,
         occupied: list[Segment] | None = None,
         crossing_penalty: float = CROSSING_PENALTY,
+        boundaries: list[RouterBBox] | None = None,
     ) -> None:
         self.grid_mm = grid_mm
         self.obstacles = list(obstacles or [])
-        self.max_steps = max_steps
+        #: Drawn rectangles that are not solid -- a route may still cross one to
+        #: reach a pin inside it -- but that a run must not travel alongside.
+        self.boundaries = list(boundaries or [])
+        self.boundary_clearance = self.BOUNDARY_CLEARANCE
+        self._boundary_edges = module_boundary_edges(
+            (box.x_min, box.y_min, box.x_max, box.y_max) for box in self.boundaries
+        )
+        #: Hard ceiling on expansions, so an unroutable pair reports rather than
+        #: searching forever.  A class attribute rather than an argument: it is a
+        #: safety budget, not a decision a caller makes per route.
+        self.max_steps = self.MAX_STEPS
         #: Wire geometry owned by *other* nets.  Unlike ``obstacles`` these are
         #: not solid: a route may cross one perpendicularly, because KiCad only
         #: unions a crossing when an endpoint lands on the other wire.  What it
         #: may not do is run along one, or turn on one.
         self.occupied = list(occupied or [])
         self.crossing_penalty = crossing_penalty
+        #: Taken from the class constants rather than the signature: these are
+        #: measured policy, not per-call decisions, and a caller that really needs
+        #: a different value can set the attribute or subclass.
+        self.bundle_discount = self.BUNDLE_DISCOUNT
+        self.min_parallel_offset = self.BUNDLE_PITCH
         #: Search-scoped state, reset by ``route``.  Kept on the instance so the
         #: per-move rules can live in their own method without threading six
         #: arguments through every call.
@@ -162,8 +261,19 @@ class SchematicRouter:
         self._end_node: tuple[int, int] = (0, 0)
         self._exempt: set[tuple[int, int]] = set()
         self._max_bends = 0
+        self._goal_dir: tuple[int, int] | None = None
         self._kind_cache: dict[tuple[int, int], int] = {}
         self._crossing_cache: dict[tuple[int, int], int] = {}
+        self._parallel_cache: dict[tuple[tuple[int, int], tuple[int, int]], int] = {}
+        #: Span index by fixed coordinate, so a parallelism probe is a lookup
+        #: rather than a scan over every foreign wire on every move.
+        self._h_spans: dict[float, list[tuple[float, float]]] = {}
+        self._v_spans: dict[float, list[tuple[float, float]]] = {}
+        for ox1, oy1, ox2, oy2 in self.occupied:
+            if abs(oy1 - oy2) <= _EPS and abs(ox1 - ox2) > _EPS:
+                self._h_spans.setdefault(round(oy1, 4), []).append((min(ox1, ox2), max(ox1, ox2)))
+            elif abs(ox1 - ox2) <= _EPS and abs(oy1 - oy2) > _EPS:
+                self._v_spans.setdefault(round(ox1, 4), []).append((min(oy1, oy2), max(oy1, oy2)))
 
     def _grid(self, point: Point) -> tuple[int, int]:
         return (round(point[0] / self.grid_mm), round(point[1] / self.grid_mm))
@@ -176,6 +286,19 @@ class SchematicRouter:
             return False
         point = self._point(node)
         return any(obstacle.contains(point) for obstacle in self.obstacles)
+
+    def _hugs_boundary(self, current: tuple[int, int], nxt: tuple[int, int]) -> bool:
+        """True when this move would run alongside a drawn boundary too closely."""
+        return hugs_boundary(
+            (
+                self._point(current)[0],
+                self._point(current)[1],
+                self._point(nxt)[0],
+                self._point(nxt)[1],
+            ),
+            self._boundary_edges,
+            self.boundary_clearance * self.grid_mm,
+        )
 
     def _occupied_kind(self, node: tuple[int, int]) -> int:
         """How foreign wire geometry covers a grid node.
@@ -227,11 +350,54 @@ class SchematicRouter:
             self._crossing_cache[node] = cached
         return cached
 
+    def _parallel_offset(self, node: tuple[int, int], direction: tuple[int, int]) -> int:
+        """Grid steps to the nearest foreign wire running alongside this move.
+
+        ``0`` when nothing runs parallel, otherwise the smallest offset found --
+        capped at ``BUNDLE_PITCH`` because that is the only offset the caller
+        rewards, and anything further away is not a bundle.  Only wires parallel
+        to the move count: a perpendicular wire is a crossing, not a neighbour.
+        """
+        if not self.occupied:
+            return 0
+        key = (node, direction)
+        cached = self._parallel_cache.get(key)
+        if cached is not None:
+            return cached
+        x_mm, y_mm = self._point(node)
+        result = 0
+        for step in range(1, self.BUNDLE_PITCH + 1):
+            for sign in (-1, 1):
+                if direction[0] != 0:
+                    probe = round(y_mm + sign * step * self.grid_mm, 4)
+                    hit = any(
+                        lo - _EPS <= x_mm <= hi + _EPS for lo, hi in self._h_spans.get(probe, ())
+                    )
+                else:
+                    probe = round(x_mm + sign * step * self.grid_mm, 4)
+                    hit = any(
+                        lo - _EPS <= y_mm <= hi + _EPS for lo, hi in self._v_spans.get(probe, ())
+                    )
+                if hit:
+                    result = step
+                    break
+            if result:
+                break
+        self._parallel_cache[key] = result
+        return result
+
     @staticmethod
     def _heuristic(node: tuple[int, int], end: tuple[int, int]) -> float:
         return abs(node[0] - end[0]) + abs(node[1] - end[1])
 
-    def route(self, start: Point, end: Point, max_bends: int = 4) -> list[Segment] | None:
+    def route(
+        self,
+        start: Point,
+        end: Point,
+        max_bends: int = 4,
+        orientation: PinOrientation | None = None,
+        on_pop: Callable[[tuple[int, int], float], None] | None = None,
+    ) -> list[Segment] | None:
         """Return routed Manhattan segments, or None if no bounded route is found.
 
         With ``occupied`` set the search also refuses to merge with another
@@ -241,6 +407,20 @@ class SchematicRouter:
         ``crossing_penalty`` so the search prefers a longer crossing-free route
         when one is cheap enough.  ``crossing_penalty=0`` restores the old
         shortest-path behaviour.
+
+        ``start_dir`` is the direction the wire is already travelling when it
+        reaches ``start`` -- normally the pin's own outward normal.  Without it
+        the first move is free in every direction, so the route may turn at the
+        pin for nothing; that unpriced turn makes two same-length candidates
+        tie, and the tie is then settled arbitrarily.  ``goal_dir`` is the
+        direction the wire must leave ``end`` in, so the hinge into the final
+        stub is charged as well.
+
+        ``on_pop`` receives ``(node, settled_cost)`` for each node the search
+        settles, in order.  It exists so a visualisation can show *this* search
+        rather than a copy of it -- a duplicated implementation drifts the moment
+        a rule like the bundle discount is added, and then the animation draws a
+        route the router never produced.
         """
         self._start_node = self._grid(start)
         self._end_node = self._grid(end)
@@ -248,11 +428,13 @@ class SchematicRouter:
         # sitting on them is a pre-existing condition, not this route's doing.
         self._exempt = {self._start_node, self._end_node}
         self._max_bends = max_bends
+        self._goal_dir = orientation.goal if orientation is not None else None
         self._kind_cache = {}
         self._crossing_cache = {}
 
         queue: list[tuple[float, int, tuple[int, int], tuple[int, int] | None, int]] = []
-        heapq.heappush(queue, (0.0, 0, self._start_node, None, 0))
+        start_dir = orientation.start if orientation is not None else None
+        heapq.heappush(queue, (0.0, 0, self._start_node, start_dir, 0))
         came_from: dict[tuple[int, int], tuple[int, int] | None] = {self._start_node: None}
         best_cost: dict[tuple[int, int], float] = {self._start_node: 0.0}
         directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
@@ -261,6 +443,8 @@ class SchematicRouter:
         while queue and explored < self.max_steps:
             _, bends, current, previous_dir, _tie = heapq.heappop(queue)
             explored += 1
+            if on_pop is not None:
+                on_pop(current, best_cost[current])
             if current == self._end_node:
                 return self._segments_from_path(self._reconstruct(came_from, current))
 
@@ -278,6 +462,22 @@ class SchematicRouter:
                 priority = new_cost + self._heuristic(nxt, self._end_node)
                 heapq.heappush(queue, (priority, next_bends, nxt, direction, explored))
         return None
+
+    def _bundle_multiplier(self, nxt: tuple[int, int], direction: tuple[int, int]) -> float | None:
+        """Cost multiplier for a step, or ``None`` when it crowds a neighbour.
+
+        Running alongside existing wire is the sheet's own idiom -- a bundle is
+        what a reader follows -- so a step at the canonical pitch is discounted
+        and a step closer than that is refused outright.  The pitch is measured,
+        not chosen: of the wires on the reference sheet that have a parallel
+        neighbour, 41 sit at two grid steps and none at one.
+        """
+        if not self.occupied:
+            return 1.0
+        offset = self._parallel_offset(nxt, direction)
+        if offset and offset < self.min_parallel_offset:
+            return None
+        return self.bundle_discount if offset == self.BUNDLE_PITCH else 1.0
 
     def _step_cost(
         self,
@@ -308,16 +508,38 @@ class SchematicRouter:
             return None
         if self._edge_overlaps_occupied(current, nxt):
             return None
+        # A drawn boundary is not solid -- the route has to cross one to reach a
+        # pin inside it -- but travelling along one is refused: the wire would
+        # read as the block's own border rather than as a connection.
+        if self._hugs_boundary(current, nxt):
+            return None
         next_bends = bends + (1 if turning else 0)
         if next_bends > self._max_bends:
             return None
         move_cost = 1.0 + (3.0 if turning else 0.0)
+        # Running alongside existing wire is the sheet's own idiom -- a bundle is
+        # what a reader follows -- so a step at the canonical pitch is discounted,
+        # and a step closer than that is refused outright.  Checked even on a
+        # turning move: the first step of a run is where it either joins a bundle
+        # or crowds one.
         if not turning:
-            # Every node reaching this line is a pass-through: a turn on a foreign
-            # wire was refused above and a parallel foreign run was refused as
-            # collinear overlap.  So a node inside one is exactly one crossing,
-            # priced rather than forbidden.
-            move_cost += self.crossing_penalty * self._crossings_at(nxt)
+            multiplier = self._bundle_multiplier(nxt, direction)
+            if multiplier is None:
+                return None
+            move_cost *= multiplier
+        # A crossing is charged wherever it happens, turning move or straight.
+        # It was once charged only on straight moves, on the assumption that a
+        # turn onto a foreign wire had already been refused -- but a turn is
+        # precisely where a route crosses one: stepping through to the far side of
+        # a wire it was running beside.  Leaving that move free made a two-bend
+        # detour cheaper than a one-bend crossing, so the search bought an extra
+        # corner to dodge a toll it still had to pay.
+        move_cost += self.crossing_penalty * self._crossings_at(nxt)
+        if nxt == self._end_node and self._goal_dir is not None and direction != self._goal_dir:
+            # The search stops here, so this turn would otherwise be free:
+            # arriving across the grain of the final stub costs a real bend in the
+            # finished wire and has to be paid for.
+            move_cost += 3.0
         return move_cost, next_bends
 
     @staticmethod
