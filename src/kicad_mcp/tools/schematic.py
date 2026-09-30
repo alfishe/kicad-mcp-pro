@@ -2666,6 +2666,18 @@ _RECTANGLE_CORNERS_RE = re.compile(
 )
 
 
+def _skip_quoted_string(content: str, quote_index: int) -> int:
+    """Return the first index after one quoted S-expression string."""
+    index = quote_index + 1
+    length = len(content)
+    while index < length and content[index] != '"':
+        if content[index] == "\\" and index + 1 < length:
+            index += 2
+        else:
+            index += 1
+    return min(index + 1, length)
+
+
 def _matching_paren(content: str, open_index: int) -> int:
     """Index of the ``)`` closing the ``(`` at ``open_index``, or ``-1``.
 
@@ -2678,12 +2690,7 @@ def _matching_paren(content: str, open_index: int) -> int:
     while index < length:
         character = content[index]
         if character == '"':
-            index += 1
-            while index < length and content[index] != '"':
-                if content[index] == "\\":
-                    index += 1
-                index += 1
-            index += 1
+            index = _skip_quoted_string(content, index)
             continue
         if character == "(":
             depth += 1
