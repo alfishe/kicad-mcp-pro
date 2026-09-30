@@ -4199,19 +4199,7 @@ def get_pin_outward_normals(
     if available_units and unit not in available_units:
         return {}
 
-    normals: dict[str, tuple[float, float]] = {}
-    for block in blocks:
-        for record in _extract_pin_records(_strip_child_symbol_blocks(block)):
-            normals[record["number"]] = _pin_record_normal(record, rotation, mirror)
-        block_name = _symbol_block_name(block)
-        if block_name is None:
-            continue
-        for child_name, child_block in _extract_child_symbol_blocks(block):
-            if not child_name.startswith((f"{block_name}_{unit}_", f"{block_name}_0_")):
-                continue
-            for record in _extract_pin_records(child_block):
-                normals[record["number"]] = _pin_record_normal(record, rotation, mirror)
-    return normals
+    return {record["number"]: _pin_record_normal(record, rotation, mirror) for block in blocks for record in _unit_pin_records(block, unit)}
 
 
 def _escape_direction(point: tuple[float, float], owner: BBox) -> tuple[float, float]:
