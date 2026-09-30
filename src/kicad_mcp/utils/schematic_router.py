@@ -386,9 +386,11 @@ class SchematicRouter:
         self._parallel_cache[key] = result
         return result
 
-    @staticmethod
-    def _heuristic(node: tuple[int, int], end: tuple[int, int]) -> float:
-        return abs(node[0] - end[0]) + abs(node[1] - end[1])
+    def _heuristic(self, node: tuple[int, int], end: tuple[int, int]) -> float:
+        """Admissible Manhattan lower bound for the active routing cost model."""
+        distance = abs(node[0] - end[0]) + abs(node[1] - end[1])
+        minimum_step_cost = min(1.0, self.bundle_discount) if self.occupied else 1.0
+        return distance * minimum_step_cost
 
     def route(
         self,
@@ -522,10 +524,10 @@ class SchematicRouter:
         # and a step closer than that is refused outright.  Checked even on a
         # turning move: the first step of a run is where it either joins a bundle
         # or crowds one.
+        multiplier = self._bundle_multiplier(nxt, direction)
+        if multiplier is None:
+            return None
         if not turning:
-            multiplier = self._bundle_multiplier(nxt, direction)
-            if multiplier is None:
-                return None
             move_cost *= multiplier
         # A crossing is charged wherever it happens, turning move or straight.
         # It was once charged only on straight moves, on the assumption that a

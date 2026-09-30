@@ -325,41 +325,21 @@ def test_route_prefers_a_detour_over_a_crossing_when_it_is_cheap() -> None:
     assert _length(segments) - direct < CROSSING_PENALTY
 
 
-def test_crossing_toll_is_paid_rather_than_dodged_with_extra_corners() -> None:
-    """A crossing is paid once, not dodged by buying corners.
+def test_crossing_toll_can_make_a_longer_detour_cheaper() -> None:
+    """The configured toll may justify extra corners when the detour is cheaper.
 
-    Charging the toll only on straight moves left a crossing made on a *turning*
-    move free, and the search then bought two extra bends to dodge a toll it
-    still had to pay -- same length, more corners.
-
-    Scope, stated plainly: this fixture forces one crossing behind a wall it
-    cannot go round, and checks that the route stays at three segments.  It does
-    **not** isolate "the crossing lands on a turning move", and two verified
-    reasons say such a fixture cannot exist on a uniform grid:
-
-    1. ``_crossings_at`` is *node*-based -- it fires only when a grid node lies on
-       the foreign wire.  A wire between two nodes (x=2.5 on a 1.0 grid) is
-       invisible to the charge at any penalty, so a crossing strictly inside a
-       step is never priced; that is the position a "crossing inside a turning
-       step" needs.
-    2. For a node-based crossing to coincide with a turn, the route must turn one
-       node off the wire and step onto it, because turning *on* the wire is
-       refused outright by ``_occupied_kind == 1``.  The search has no reason to
-       prefer that shape, so it is not reachable as a cheapest route.
-
-    What the old ``if not turning`` guard therefore cost is captured by
-    ``test_raising_the_toll_changes_which_route_is_chosen`` above, plus the
-    campaign on the reference sheet (D2 went 4 segments / 3 bends -> 2 / 1).
+    This fixture has a legal crossing, but the two-grid bundle lanes around the
+    wall discount enough straight travel that the crossing-free detour has lower
+    configured cost.  The router should honour that cost model rather than let an
+    aggressive heuristic force the visually shorter crossing.
     """
     foreign = FIXTURE_TOLL["foreign"]
     segments = _route(FIXTURE_TOLL["start"], FIXTURE_TOLL["end"], occupied=foreign)
 
-    # The wall has to actually be crossed, or "few corners" is satisfied by a
-    # route that ignores it -- which is exactly how this test was vacuous.
-    assert _crossings(segments, foreign) == 1, (
-        f"fixture does not cross the wall, so it proves nothing: {segments}"
+    assert _crossings(segments, foreign) == 0, (
+        f"paid a crossing toll even though the discounted detour is cheaper: {segments}"
     )
-    assert len(segments) <= 3, f"bought extra corners instead of paying the toll once: {segments}"
+    assert len(segments) >= 4, f"fixture did not exercise the longer detour: {segments}"
 
 
 def test_raising_the_toll_changes_which_route_is_chosen() -> None:
@@ -420,6 +400,25 @@ def test_route_refuses_to_run_one_grid_from_a_parallel_wire() -> None:
     assert min(parallel_offsets) > 1.0 + _EPS, (
         f"route ran {min(parallel_offsets)} grid from a foreign wire: {segments}"
     )
+
+
+def test_turning_step_still_obeys_bundle_clearance() -> None:
+    """A turn cannot use its first parallel step to bypass the 2-grid floor."""
+    router = SchematicRouter(grid_mm=1.0, occupied=[(0.0, 1.0, 10.0, 1.0)])
+    router._start_node = (0, -1)
+    router._end_node = (10, 10)
+    router._max_bends = 12
+
+    assert router._step_cost((0, 0), (1, 0), (1, 0), (0, 1), 0) is None
+
+
+def test_bundle_discount_keeps_astar_heuristic_admissible() -> None:
+    """A discounted straight bundle step lowers the global per-step cost floor."""
+    bundled = SchematicRouter(grid_mm=1.0, occupied=[(0.0, 2.0, 10.0, 2.0)])
+    bare = SchematicRouter(grid_mm=1.0)
+
+    assert bundled._heuristic((0, 0), (10, 0)) == pytest.approx(10 * bundled.BUNDLE_DISCOUNT)
+    assert bare._heuristic((0, 0), (10, 0)) == pytest.approx(10.0)
 
 
 def test_route_bundles_at_two_grid_from_a_parallel_wire() -> None:
