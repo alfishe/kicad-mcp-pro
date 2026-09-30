@@ -2702,51 +2702,60 @@ def _matching_paren(content: str, open_index: int) -> int:
     return -1
 
 
-def _sheet_graphic_rectangles(
-    sexpr_content: str,
-) -> list[tuple[float, float, float, float]]:
-    """Bare rectangles drawn directly on the sheet, as ``(x1, y1, x2, y2)``.
-
-    A designer draws one of these to fence off a circuit that belongs together
-    -- the reference sheet wraps its energy-measurement block in one -- and a
-    wire that then runs along the rectangle's edge defeats the drawing: it reads
-    as the block's own border rather than as a connection.
-
-    Only items at the sheet's own nesting level count.  ``(rectangle ...)`` is
-    also the token for every symbol's body outline, several hundred of them, and
-    those are already covered by the symbol keepout.
-    """
-    item_depth = 2  # 1 is ``(kicad_sch`` itself, so its children are at 2
-    rectangles: list[tuple[float, float, float, float]] = []
+def _iter_named_sexpr_blocks_at_depth(
+    content: str,
+    target_depth: int,
+) -> Iterable[tuple[str, str]]:
+    """Yield named S-expression blocks opened at one nesting depth."""
     depth = 0
     index = 0
-    length = len(sexpr_content)
+    length = len(content)
     while index < length:
-        character = sexpr_content[index]
+        character = content[index]
         if character == '"':
-            index += 1
-            while index < length and sexpr_content[index] != '"':
-                if sexpr_content[index] == "\\":
-                    index += 1
-                index += 1
+            index = _skip_quoted_string(content, index)
+            continue
+        if character == ")":
+            depth -= 1
             index += 1
             continue
         if character != "(":
-            if character == ")":
-                depth -= 1
             index += 1
             continue
         open_index = index
         depth += 1
         index += 1
-        name = _SEXPR_NAME_RE.match(sexpr_content, index)
-        if name is not None and depth == item_depth and name.group(0) == "rectangle":
-            close_index = _matching_paren(sexpr_content, open_index)
-            if close_index > 0:
-                corners = _RECTANGLE_CORNERS_RE.search(sexpr_content[open_index : close_index + 1])
-                if corners is not None:
-                    x1, y1, x2, y2 = (float(value) for value in corners.groups())
-                    rectangles.append((min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)))
+        if depth != target_depth:
+            continue
+        name = _SEXPR_NAME_RE.match(content, index)
+        if name is None:
+            continue
+        close_index = _matching_paren(content, open_index)
+        if close_index > open_index:
+            yield name.group(0), content[open_index : close_index + 1]
+
+
+def _rectangle_bounds_from_block(
+    block: str,
+) -> tuple[float, float, float, float] | None:
+    corners = _RECTANGLE_CORNERS_RE.search(block)
+    if corners is None:
+        return None
+    x1, y1, x2, y2 = (float(value) for value in corners.groups())
+    return (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+
+
+def _sheet_graphic_rectangles(
+    sexpr_content: str,
+) -> list[tuple[float, float, float, float]]:
+    """Return bare rectangles drawn directly at the sheet level."""
+    rectangles: list[tuple[float, float, float, float]] = []
+    for name, block in _iter_named_sexpr_blocks_at_depth(sexpr_content, 2):
+        if name != "rectangle":
+            continue
+        bounds = _rectangle_bounds_from_block(block)
+        if bounds is not None:
+            rectangles.append(bounds)
     return rectangles
 
 
