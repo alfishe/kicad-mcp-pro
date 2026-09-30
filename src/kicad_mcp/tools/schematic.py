@@ -2519,6 +2519,57 @@ def _place_rotated_points(
         ys.append(sym_y + rotated_y)
 
 
+def _add_symbol_primitive_points(
+    xs: list[float],
+    ys: list[float],
+    target: str,
+    origin: tuple[float, float],
+    rotation: int,
+) -> None:
+    """Append all primitive points required to bound one symbol block."""
+    _place_rotated_points(
+        xs,
+        ys,
+        ((float(px), float(py)) for px, py in _XY_RE.findall(target)),
+        origin,
+        rotation,
+    )
+    _place_rotated_points(
+        xs,
+        ys,
+        ((float(px), float(py)) for px, py in _START_END_MID_RE.findall(target)),
+        origin,
+        rotation,
+    )
+    for center_x, center_y, radius in _CIRCLE_RE.findall(target):
+        cx, cy, r = float(center_x), float(center_y), float(radius)
+        _place_rotated_points(
+            xs,
+            ys,
+            ((cx - r, cy), (cx + r, cy), (cx, cy - r), (cx, cy + r)),
+            origin,
+            rotation,
+        )
+    for values in _ARC_RE.findall(target):
+        start = (float(values[0]), float(values[1]))
+        mid = (float(values[2]), float(values[3]))
+        end = (float(values[4]), float(values[5]))
+        _place_rotated_points(
+            xs,
+            ys,
+            _arc_extent_points(start, mid, end),
+            origin,
+            rotation,
+        )
+    _place_rotated_points(
+        xs,
+        ys,
+        ((float(px), float(py)) for px, py, _ in _PIN_AT_RE.findall(target)),
+        origin,
+        rotation,
+    )
+
+
 def get_symbol_primitive_bounds(
     library: str,
     symbol_name: str,
@@ -2557,53 +2608,9 @@ def get_symbol_primitive_bounds(
             # root block is parsed as-is.
             target_blocks = [block]
 
+        origin = (sym_x, sym_y)
         for target in target_blocks:
-            origin = (sym_x, sym_y)
-            _place_rotated_points(
-                xs,
-                ys,
-                ((float(px), float(py)) for px, py in _XY_RE.findall(target)),
-                origin,
-                rotation,
-            )
-            _place_rotated_points(
-                xs,
-                ys,
-                ((float(px), float(py)) for px, py in _START_END_MID_RE.findall(target)),
-                origin,
-                rotation,
-            )
-            for center_x, center_y, radius in _CIRCLE_RE.findall(target):
-                _place_rotated_points(
-                    xs,
-                    ys,
-                    (
-                        (float(center_x) - float(radius), float(center_y)),
-                        (float(center_x) + float(radius), float(center_y)),
-                        (float(center_x), float(center_y) - float(radius)),
-                        (float(center_x), float(center_y) + float(radius)),
-                    ),
-                    origin,
-                    rotation,
-                )
-            for values in _ARC_RE.findall(target):
-                start = (float(values[0]), float(values[1]))
-                mid = (float(values[2]), float(values[3]))
-                end = (float(values[4]), float(values[5]))
-                _place_rotated_points(
-                    xs,
-                    ys,
-                    _arc_extent_points(start, mid, end),
-                    origin,
-                    rotation,
-                )
-            _place_rotated_points(
-                xs,
-                ys,
-                ((float(px), float(py)) for px, py, _ in _PIN_AT_RE.findall(target)),
-                origin,
-                rotation,
-            )
+            _add_symbol_primitive_points(xs, ys, target, origin, rotation)
 
     if not xs or not ys:
         return None
