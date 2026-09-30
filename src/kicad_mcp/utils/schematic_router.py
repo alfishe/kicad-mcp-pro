@@ -155,6 +155,13 @@ class SchematicRouter:
         #: may not do is run along one, or turn on one.
         self.occupied = list(occupied or [])
         self.crossing_penalty = crossing_penalty
+        #: Search-scoped state, reset by ``route``.  Kept on the instance so the
+        #: per-move rules can live in their own method without threading six
+        #: arguments through every call.
+        self._start_node: tuple[int, int] = (0, 0)
+        self._end_node: tuple[int, int] = (0, 0)
+        self._exempt: set[tuple[int, int]] = set()
+        self._max_bends = 0
         self._kind_cache: dict[tuple[int, int], int] = {}
         self._crossing_cache: dict[tuple[int, int], int] = {}
 
@@ -235,59 +242,83 @@ class SchematicRouter:
         when one is cheap enough.  ``crossing_penalty=0`` restores the old
         shortest-path behaviour.
         """
-        start_node = self._grid(start)
-        end_node = self._grid(end)
+        self._start_node = self._grid(start)
+        self._end_node = self._grid(end)
         # The two endpoints are pins of the net being routed.  Foreign geometry
         # sitting on them is a pre-existing condition, not this route's doing.
-        exempt = {start_node, end_node}
+        self._exempt = {self._start_node, self._end_node}
+        self._max_bends = max_bends
         self._kind_cache = {}
         self._crossing_cache = {}
+
         queue: list[tuple[float, int, tuple[int, int], tuple[int, int] | None, int]] = []
-        heapq.heappush(queue, (0.0, 0, start_node, None, 0))
-        came_from: dict[tuple[int, int], tuple[int, int] | None] = {start_node: None}
-        best_cost: dict[tuple[int, int], float] = {start_node: 0.0}
+        heapq.heappush(queue, (0.0, 0, self._start_node, None, 0))
+        came_from: dict[tuple[int, int], tuple[int, int] | None] = {self._start_node: None}
+        best_cost: dict[tuple[int, int], float] = {self._start_node: 0.0}
         directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
         explored = 0
 
         while queue and explored < self.max_steps:
             _, bends, current, previous_dir, _tie = heapq.heappop(queue)
             explored += 1
-            if current == end_node:
+            if current == self._end_node:
                 return self._segments_from_path(self._reconstruct(came_from, current))
 
             for direction in directions:
                 nxt = (current[0] + direction[0], current[1] + direction[1])
-                if self._blocked(nxt, start_node, end_node):
+                step = self._step_cost(current, nxt, direction, previous_dir, bends)
+                if step is None:
                     continue
-                turning = previous_dir is not None and previous_dir != direction
-                # A turn makes ``current`` a vertex of the path.  A vertex on a
-                # foreign wire is an endpoint-on-wire contact, which KiCad unions.
-                if turning and current not in exempt and self._occupied_kind(current) == 1:
-                    continue
-                # A foreign wire's own endpoint must never be stood on, even in
-                # a straight through-move: that endpoint would lie on our run.
-                if nxt not in exempt and self._occupied_kind(nxt) == 2:
-                    continue
-                if self._edge_overlaps_occupied(current, nxt):
-                    continue
-                next_bends = bends + (1 if turning else 0)
-                if next_bends > max_bends:
-                    continue
-                move_cost = 1.0 + (3.0 if turning else 0.0)
-                if not turning:
-                    # Every node reaching this line is a pass-through: a turn on
-                    # a foreign wire was refused above and a parallel foreign run
-                    # was refused as collinear overlap.  So a node inside one is
-                    # exactly one crossing, priced rather than forbidden.
-                    move_cost += self.crossing_penalty * self._crossings_at(nxt)
+                move_cost, next_bends = step
                 new_cost = best_cost[current] + move_cost
                 if new_cost >= best_cost.get(nxt, float("inf")):
                     continue
                 came_from[nxt] = current
                 best_cost[nxt] = new_cost
-                priority = new_cost + self._heuristic(nxt, end_node)
+                priority = new_cost + self._heuristic(nxt, self._end_node)
                 heapq.heappush(queue, (priority, next_bends, nxt, direction, explored))
         return None
+
+    def _step_cost(
+        self,
+        current: tuple[int, int],
+        nxt: tuple[int, int],
+        direction: tuple[int, int],
+        previous_dir: tuple[int, int] | None,
+        bends: int,
+    ) -> tuple[float, int] | None:
+        """Cost of one move, or ``None`` when the move is refused.
+
+        Lifted out of the search loop so the loop reads as a search: all the rules
+        about *other* nets are here, and they are asymmetric on purpose.  Running
+        along a foreign wire, turning on one, and landing an endpoint on one each
+        make KiCad union two nets into a silent short, so they are refused; a
+        perpendicular crossing is legal and merely priced.
+        """
+        if self._blocked(nxt, self._start_node, self._end_node):
+            return None
+        turning = previous_dir is not None and previous_dir != direction
+        # A turn makes ``current`` a vertex of the path.  A vertex on a foreign
+        # wire is an endpoint-on-wire contact, which KiCad unions.
+        if turning and current not in self._exempt and self._occupied_kind(current) == 1:
+            return None
+        # A foreign wire's own endpoint must never be stood on, even in a straight
+        # through-move: that endpoint would lie on our run.
+        if nxt not in self._exempt and self._occupied_kind(nxt) == 2:
+            return None
+        if self._edge_overlaps_occupied(current, nxt):
+            return None
+        next_bends = bends + (1 if turning else 0)
+        if next_bends > self._max_bends:
+            return None
+        move_cost = 1.0 + (3.0 if turning else 0.0)
+        if not turning:
+            # Every node reaching this line is a pass-through: a turn on a foreign
+            # wire was refused above and a parallel foreign run was refused as
+            # collinear overlap.  So a node inside one is exactly one crossing,
+            # priced rather than forbidden.
+            move_cost += self.crossing_penalty * self._crossings_at(nxt)
+        return move_cost, next_bends
 
     @staticmethod
     def _reconstruct(
