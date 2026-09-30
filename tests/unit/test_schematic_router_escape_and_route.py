@@ -30,7 +30,6 @@ libraries are marked ``requires_kicad_library`` and skip when they are absent.
 
 from __future__ import annotations
 
-import random
 from pathlib import Path
 
 import pytest
@@ -283,7 +282,22 @@ FIXTURE_LIBRARY = """(kicad_symbol_lib
 			(name "" (effects (font (size 1.27 1.27))))
 			(number "2" (effects (font (size 1.27 1.27))))
 		)
-	)	(symbol "EMPTY"
+	)
+	(symbol "ARC_EXTREME"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "A" (at 0 3 0) (effects (font (size 1.27 1.27))))
+		(property "Value" "ARC_EXTREME" (at 0 -3 0) (effects (font (size 1.27 1.27))))
+		(symbol "ARC_EXTREME_0_1"
+			(arc (start 1.7321 1) (mid 1 1.7321) (end -1.7321 1)
+				(stroke (width 0.254) (type default)) (fill (type none))
+			)
+		)
+	)
+	(symbol "EMPTY"
 		(pin_numbers (hide yes))
 		(pin_names (offset 0))
 		(exclude_from_sim no)
@@ -306,6 +320,7 @@ FIXTURE_EXTENTS: list[tuple[str, float, float]] = [
     # FLAT keeps its primitives inline with no ``_0_1``/``_1_1`` unit children,
     # as flattened and imported symbols often do.
     ("FLAT", 7.62, 2.54),
+    ("ARC_EXTREME", 3.4642, 1.0),
 ]
 
 #: ``(reference, symbol, x_mm, y_mm)`` sheet used by the routing tests.  It keeps
@@ -370,6 +385,17 @@ def _pins() -> list[dict[str, object]]:
         for number, (px, py) in get_pin_positions("Fixture", sym, x, y, 0, 1).items():
             pins.append({"ref": ref, "pin": number, "point": _snap_point(px, py, True)})
     return pins
+
+
+def _deterministic_permutation(length: int, seed: int) -> list[int]:
+    """Return a reproducible pseudo-shuffle without a security-sensitive PRNG."""
+    return sorted(
+        range(length),
+        key=lambda index: (
+            ((index + 1) * 0x9E3779B1) ^ ((seed + 1) * 0x85EBCA77)
+        )
+        & 0xFFFFFFFF,
+    )
 
 
 def _penetrates(segment: _Segment, box: BBox) -> bool:
@@ -470,8 +496,9 @@ def _random_nets(seed: int) -> list[list[dict[str, object]]]:
     No two nets share a pin, so any geometry merge detected later is the
     router's doing rather than an artefact of the partition.
     """
-    pins = list(_pins())
-    random.Random(seed).shuffle(pins)  # noqa: S311 - deterministic test cases, not security
+    pins = _pins()
+    order = _deterministic_permutation(len(pins), seed)
+    pins = [pins[index] for index in order]
     nets: list[list[dict[str, object]]] = []
     index = 0
     while index < len(pins):
@@ -559,6 +586,16 @@ def test_capacitor_extent_covers_plates_beyond_its_collinear_pins(
     # A pin-only box would report zero width here.
     assert bounds[0] == pytest.approx(-2.032, abs=1e-4)
     assert bounds[2] == pytest.approx(2.032, abs=1e-4)
+
+
+def test_arc_extent_includes_cardinal_extremum(fixture_library: Path) -> None:
+    """An arc keepout must include extrema that are not start/mid/end points."""
+    bounds = get_symbol_primitive_bounds("Fixture", "ARC_EXTREME", 0.0, 0.0, 0, 1)
+    assert bounds is not None
+    assert bounds[0] == pytest.approx(-1.7321, abs=1e-4)
+    assert bounds[1] == pytest.approx(-2.0, abs=1e-4)
+    assert bounds[2] == pytest.approx(1.7321, abs=1e-4)
+    assert bounds[3] == pytest.approx(-1.0, abs=1e-4)
 
 
 def test_transistor_extent_includes_the_enclosing_circle(fixture_library: Path) -> None:
@@ -943,7 +980,9 @@ def test_independent_nets_survive_geometry_union(boxes_by_ref: dict[str, BBox]) 
         for attempt in range(_ORDER_ATTEMPTS):
             order = list(range(len(nets)))
             if attempt:
-                random.Random(seed * _ORDER_ATTEMPTS + attempt).shuffle(order)  # noqa: S311
+                order = _deterministic_permutation(
+                    len(nets), seed * _ORDER_ATTEMPTS + attempt
+                )
             net_segments, refused = _route_batch(nets, boxes, order)
             distinct = _distinct_nets(net_segments)
             assert distinct == len(nets), (
