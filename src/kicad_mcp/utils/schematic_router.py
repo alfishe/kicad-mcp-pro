@@ -132,10 +132,14 @@ def module_boundary_edges(
     """
     edges: list[tuple[bool, float, float, float]] = []
     for x_min, y_min, x_max, y_max in rectangles:
-        edges.append((True, x_min, y_min, y_max))
-        edges.append((True, x_max, y_min, y_max))
-        edges.append((False, y_min, x_min, x_max))
-        edges.append((False, y_max, x_min, x_max))
+        edges.extend(
+            (
+                (True, x_min, y_min, y_max),
+                (True, x_max, y_min, y_max),
+                (False, y_min, x_min, x_max),
+                (False, y_max, x_min, x_max),
+            )
+        )
     return edges
 
 
@@ -235,14 +239,14 @@ class SchematicRouter:
         #: Drawn rectangles that are not solid -- a route may still cross one to
         #: reach a pin inside it -- but that a run must not travel alongside.
         self.boundaries = list(boundaries or [])
-        self.boundary_clearance = self.BOUNDARY_CLEARANCE
+        self.boundary_clearance_steps = self.BOUNDARY_CLEARANCE
         self._boundary_edges = module_boundary_edges(
             (box.x_min, box.y_min, box.x_max, box.y_max) for box in self.boundaries
         )
         #: Hard ceiling on expansions, so an unroutable pair reports rather than
         #: searching forever.  A class attribute rather than an argument: it is a
         #: safety budget, not a decision a caller makes per route.
-        self.max_steps = self.MAX_STEPS
+        self.max_expansions = self.MAX_STEPS
         #: Wire geometry owned by *other* nets.  Unlike ``obstacles`` these are
         #: not solid: a route may cross one perpendicularly, because KiCad only
         #: unions a crossing when an endpoint lands on the other wire.  What it
@@ -252,7 +256,7 @@ class SchematicRouter:
         #: Taken from the class constants rather than the signature: these are
         #: measured policy, not per-call decisions, and a caller that really needs
         #: a different value can set the attribute or subclass.
-        self.bundle_discount = self.BUNDLE_DISCOUNT
+        self.bundle_step_discount = self.BUNDLE_DISCOUNT
         self.min_parallel_offset = self.BUNDLE_PITCH
         #: Search-scoped state, reset by ``route``.  Kept on the instance so the
         #: per-move rules can live in their own method without threading six
@@ -297,7 +301,7 @@ class SchematicRouter:
                 self._point(nxt)[1],
             ),
             self._boundary_edges,
-            self.boundary_clearance * self.grid_mm,
+            self.boundary_clearance_steps * self.grid_mm,
         )
 
     def _occupied_kind(self, node: tuple[int, int]) -> int:
@@ -389,8 +393,17 @@ class SchematicRouter:
     def _heuristic(self, node: tuple[int, int], end: tuple[int, int]) -> float:
         """Admissible Manhattan lower bound for the active routing cost model."""
         distance = abs(node[0] - end[0]) + abs(node[1] - end[1])
-        minimum_step_cost = min(1.0, self.bundle_discount) if self.occupied else 1.0
+        minimum_step_cost = min(1.0, self.bundle_step_discount) if self.occupied else 1.0
         return distance * minimum_step_cost
+
+    @staticmethod
+    def _emit_pop(
+        callback: Callable[[tuple[int, int], float], None] | None,
+        node: tuple[int, int],
+        cost: float,
+    ) -> None:
+        if callback is not None:
+            callback(node, cost)
 
     def route(
         self,
@@ -442,11 +455,10 @@ class SchematicRouter:
         directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
         explored = 0
 
-        while queue and explored < self.max_steps:
+        while queue and explored < self.max_expansions:
             _, bends, current, previous_dir, _tie = heapq.heappop(queue)
             explored += 1
-            if on_pop is not None:
-                on_pop(current, best_cost[current])
+            self._emit_pop(on_pop, current, best_cost[current])
             if current == self._end_node:
                 return self._segments_from_path(self._reconstruct(came_from, current))
 
@@ -479,7 +491,7 @@ class SchematicRouter:
         offset = self._parallel_offset(nxt, direction)
         if offset and offset < self.min_parallel_offset:
             return None
-        return self.bundle_discount if offset == self.BUNDLE_PITCH else 1.0
+        return self.bundle_step_discount if offset == self.BUNDLE_PITCH else 1.0
 
     def _step_cost(
         self,
