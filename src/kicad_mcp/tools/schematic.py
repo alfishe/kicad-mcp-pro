@@ -2463,21 +2463,15 @@ def _arc_extent_points(
     x1, y1 = start
     x2, y2 = mid
     x3, y3 = end
-    denominator = 2.0 * (
-        x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)
-    )
+    denominator = 2.0 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2))
     if abs(denominator) <= 1e-12:
         return (start, mid, end)
 
     p1 = x1 * x1 + y1 * y1
     p2 = x2 * x2 + y2 * y2
     p3 = x3 * x3 + y3 * y3
-    center_x = (
-        p1 * (y2 - y3) + p2 * (y3 - y1) + p3 * (y1 - y2)
-    ) / denominator
-    center_y = (
-        p1 * (x3 - x2) + p2 * (x1 - x3) + p3 * (x2 - x1)
-    ) / denominator
+    center_x = (p1 * (y2 - y3) + p2 * (y3 - y1) + p3 * (y1 - y2)) / denominator
+    center_y = (p1 * (x3 - x2) + p2 * (x1 - x3) + p3 * (x2 - x1)) / denominator
     radius = math.hypot(x1 - center_x, y1 - center_y)
 
     start_angle = math.atan2(y1 - center_y, x1 - center_x) % math.tau
