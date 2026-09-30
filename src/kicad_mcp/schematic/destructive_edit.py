@@ -27,6 +27,8 @@ type SnapNotice = Callable[[tuple[float, ...], tuple[float, ...]], str]
 type NormalizeLabelJustify = Callable[[str | None], str | None]
 type SetLabelJustify = Callable[[str, str], str]
 
+_JUNCTION_AT_RE = re.compile(r"\(at\s+([-\d.]+)\s+([-\d.]+)\)")
+
 
 class TransactionalWrite(Protocol):
     """Transaction boundary used by schematic edit orchestration."""
@@ -37,6 +39,52 @@ class TransactionalWrite(Protocol):
         *,
         allow_node_loss: bool = False,
     ) -> str: ...
+
+
+def strip_junctions_without_wire_ends(
+    text: str,
+    extract_wires: ExtractWires,
+    extract_block: ExtractBlock,
+) -> tuple[str, int]:
+    """Drop junction dots that no wire terminates on.
+
+    Deleting a wire leaves its junctions behind.  The dot that marked a T no
+    longer joins anything, and it is worse than cosmetic: the missing-junction
+    repair treats a point that already has a junction as correct, so a stale dot
+    actively suppresses the junction that belongs there.  A junction with no wire
+    *ending* on it holds nothing together -- a crossing is not a connection in
+    KiCad -- so it is removed.
+
+    Conservative on purpose: a dot that any wire endpoint still lands on is kept,
+    so a deliberate junction at a pin feeding two wires survives.
+
+    Takes the two text readers it needs instead of the whole service, so the rule
+    can be exercised on a bare sheet in a unit test.
+    """
+    ends: set[tuple[float, float]] = set()
+    for wire in extract_wires(text):
+        ends.add((round(float(wire["x1"]), 4), round(float(wire["y1"]), 4)))
+        ends.add((round(float(wire["x2"]), 4), round(float(wire["y2"]), 4)))
+
+    pieces: list[str] = []
+    cursor = 0
+    last = 0
+    removed = 0
+    while cursor < len(text):
+        if text[cursor:].startswith("(junction"):
+            block, length = extract_block(text, cursor)
+            at = _JUNCTION_AT_RE.search(block) if block else None
+            if at is not None and length:
+                point = (round(float(at.group(1)), 4), round(float(at.group(2)), 4))
+                if point not in ends:
+                    pieces.append(text[last:cursor])
+                    cursor += length
+                    last = cursor
+                    removed += 1
+                    continue
+        cursor += 1
+    pieces.append(text[last:])
+    return "".join(pieces), removed
 
 
 @dataclass(frozen=True)
@@ -63,6 +111,10 @@ class SchematicDestructiveEditService:
     snap_notice: SnapNotice
     normalize_label_justify: NormalizeLabelJustify
     set_label_justify: SetLabelJustify
+
+    def _strip_junctions_without_wire_ends(self, text: str) -> tuple[str, int]:
+        """Drop junction dots that no wire terminates on -- see the module function."""
+        return strip_junctions_without_wire_ends(text, self.extract_wires, self.extract_block)
 
     def delete_wire(self, wire_id: str) -> str:
         """Delete one wire selected by UUID or unique UUID prefix."""
@@ -118,7 +170,7 @@ class SchematicDestructiveEditService:
             pieces.append(current_text[last:])
             if not removed:
                 raise ValueError(f"Wire '{wire_id}' could not be removed.")
-            return "".join(pieces)
+            return self._strip_junctions_without_wire_ends("".join(pieces))[0]
 
         try:
             self.transactional_write(mutator, allow_node_loss=True)
