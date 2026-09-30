@@ -636,7 +636,8 @@ def test_extent_rotation_swaps_the_axes(fixture_library: Path) -> None:
     """A rotated placement must rotate the extents, not reuse the raw box."""
     upright = get_symbol_primitive_bounds("Fixture", "R", 100.0, 100.0, 0, 1)
     sideways = get_symbol_primitive_bounds("Fixture", "R", 100.0, 100.0, 90, 1)
-    assert upright is not None and sideways is not None
+    assert upright is not None
+    assert sideways is not None
     assert (upright[2] - upright[0], upright[3] - upright[1]) == pytest.approx(
         (2.032, 7.62), abs=1e-4
     )
