@@ -4158,6 +4158,19 @@ def _pin_record_normal(record: dict[str, Any], rotation: int, mirror: str) -> tu
     return _place_normal(ox, oy, rotation, mirror)
 
 
+def _unit_pin_records(block: str, unit: int) -> list[dict[str, Any]]:
+    """Collect direct and requested-unit pin records for one symbol block."""
+    records = list(_extract_pin_records(_strip_child_symbol_blocks(block)))
+    block_name = _symbol_block_name(block)
+    if block_name is None:
+        return records
+    unit_prefixes = (f"{block_name}_{unit}_", f"{block_name}_0_")
+    for child_name, child_block in _extract_child_symbol_blocks(block):
+        if child_name.startswith(unit_prefixes):
+            records.extend(_extract_pin_records(child_block))
+    return records
+
+
 def get_pin_outward_normals(
     library: str,
     symbol_name: str,
