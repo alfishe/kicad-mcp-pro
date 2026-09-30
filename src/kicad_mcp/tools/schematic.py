@@ -2429,6 +2429,32 @@ def _wire_segments_from_content(content: str) -> list[tuple[float, float, float,
     ]
 
 
+_XY_RE = re.compile(r"\(xy\s+([-\d.]+)\s+([-\d.]+)\)")
+_START_END_MID_RE = re.compile(r"\((?:start|end|mid)\s+([-\d.]+)\s+([-\d.]+)\)")
+_CIRCLE_RE = re.compile(r"\(circle\s+\(center\s+([-\d.]+)\s+([-\d.]+)\)\s+\(radius\s+([-\d.]+)\)")
+_PIN_AT_RE = re.compile(r"\(pin\s+[a-z_]+\s+[a-z_]+\s+\(at\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\)")
+
+
+def _place_rotated_points(
+    xs: list[float],
+    ys: list[float],
+    points: Iterable[tuple[float, float]],
+    origin: tuple[float, float],
+    rotation: int,
+) -> None:
+    """Map library-local points onto the sheet, rotating as KiCad does.
+
+    Split out because the same rotate-and-place step is needed for ``(xy ...)``,
+    ``(start|end|mid ...)`` and circle geometry, and three copies of it inside one
+    function is what made that function's branching hard to follow.
+    """
+    sym_x, sym_y = origin
+    for local_x, local_y in points:
+        rotated_x, rotated_y = rotate_point(local_x, -local_y, -rotation)
+        xs.append(sym_x + rotated_x)
+        ys.append(sym_y + rotated_y)
+
+
 def get_symbol_primitive_bounds(
     library: str,
     symbol_name: str,
@@ -2468,30 +2494,41 @@ def get_symbol_primitive_bounds(
             target_blocks = [block]
 
         for target in target_blocks:
-            for mx, my in re.findall(r"\(xy\s+([-\d.]+)\s+([-\d.]+)\)", target):
-                rx, ry = rotate_point(float(mx), -float(my), -rotation)
-                xs.append(sym_x + rx)
-                ys.append(sym_y + ry)
-
-            for mx, my in re.findall(r"\((?:start|end|mid)\s+([-\d.]+)\s+([-\d.]+)\)", target):
-                rx, ry = rotate_point(float(mx), -float(my), -rotation)
-                xs.append(sym_x + rx)
-                ys.append(sym_y + ry)
-
-            for cx_str, cy_str, r_str in re.findall(
-                r"\(circle\s+\(center\s+([-\d.]+)\s+([-\d.]+)\)\s+\(radius\s+([-\d.]+)\)", target
-            ):
-                rcx, rcy = rotate_point(float(cx_str), -float(cy_str), -rotation)
-                r = float(r_str)
-                xs.extend([sym_x + rcx - r, sym_x + rcx + r])
-                ys.extend([sym_y + rcy - r, sym_y + rcy + r])
-
-            for mx, my, _ in re.findall(
-                r"\(pin\s+[a-z_]+\s+[a-z_]+\s+\(at\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\)", target
-            ):
-                rx, ry = rotate_point(float(mx), -float(my), -rotation)
-                xs.append(sym_x + rx)
-                ys.append(sym_y + ry)
+            origin = (sym_x, sym_y)
+            _place_rotated_points(
+                xs,
+                ys,
+                ((float(px), float(py)) for px, py in _XY_RE.findall(target)),
+                origin,
+                rotation,
+            )
+            _place_rotated_points(
+                xs,
+                ys,
+                ((float(px), float(py)) for px, py in _START_END_MID_RE.findall(target)),
+                origin,
+                rotation,
+            )
+            for center_x, center_y, radius in _CIRCLE_RE.findall(target):
+                _place_rotated_points(
+                    xs,
+                    ys,
+                    (
+                        (float(center_x) - float(radius), float(center_y)),
+                        (float(center_x) + float(radius), float(center_y)),
+                        (float(center_x), float(center_y) - float(radius)),
+                        (float(center_x), float(center_y) + float(radius)),
+                    ),
+                    origin,
+                    rotation,
+                )
+            _place_rotated_points(
+                xs,
+                ys,
+                ((float(px), float(py)) for px, py, _ in _PIN_AT_RE.findall(target)),
+                origin,
+                rotation,
+            )
 
     if not xs or not ys:
         return None
