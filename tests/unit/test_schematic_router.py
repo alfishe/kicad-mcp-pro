@@ -14,7 +14,7 @@ def test_schematic_router_bypasses_obstacle() -> None:
         grid_mm=2.54,
         obstacles=[RouterBBox(2.0, -1.0, 6.0, 1.0)],
     )
-    router.max_steps = 300
+    router.max_expansions = 300
 
     segments = router.route((0.0, 0.0), (10.16, 0.0))
 
@@ -28,7 +28,7 @@ def test_schematic_router_returns_none_when_bend_budget_is_too_small() -> None:
         grid_mm=2.54,
         obstacles=[RouterBBox(2.0, -1.0, 6.0, 1.0)],
     )
-    router.max_steps = 80
+    router.max_expansions = 80
 
     assert router.route((0.0, 0.0), (10.16, 0.0), max_bends=0) is None
 
