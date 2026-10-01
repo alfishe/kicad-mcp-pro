@@ -3746,6 +3746,11 @@ def _pin_label_stub_direction(
     horizontally, pins on the top/bottom edge stub vertically.  Fall back to
     the historical origin-based dominant axis only for interior pins or
     degenerate one-dimensional symbols.
+
+    For a degenerate row/column the body center decides the axis: a center on
+    the row/column means the pins point along it (two-terminal parts), so the
+    stub follows the axis and the terminal label stays horizontal; a center off
+    it means a connector edge, so the stub stays perpendicular.
     """
     px, py = pin_point
     ox, oy = symbol_origin
@@ -3761,16 +3766,22 @@ def _pin_label_stub_direction(
         edge_tol = 1e-3
         x_span = max_x - min_x
         y_span = max_y - min_y
-        # A single-column connector has every pin on the same X coordinate.  The
-        # top/bottom pins are geometric extrema, but routing them vertically makes
-        # their terminal stubs run through neighbouring pins and can short nets.
-        # Treat one-dimensional vertical pin rows as side pins and stub away from
-        # the symbol body instead.
+        # A degenerate one-dimensional pin layout has no second axis to read the
+        # outward direction from, so the body center decides it: a pin always
+        # points away from the body.  When the center lies ON the row/column the
+        # part is a two-terminal device (R, C, D, SW, LED) whose pins point ALONG
+        # the axis; the stub must follow the axis or the terminal label renders at
+        # rotation 90/270 and reads unreadably.  When the center is OFF the axis
+        # the pins are a connector edge pointing perpendicular to it, and the stub
+        # must stay perpendicular so parallel stubs clear the pin stack instead of
+        # running through neighbouring pins and shorting nets.
         if x_span <= edge_tol and y_span > edge_tol:
+            if abs(ox - px) <= edge_tol:
+                return (0.0, (1.0 if py >= oy else -1.0))
             return ((1.0 if px >= ox else -1.0), 0.0)
-        # Conversely, a single-row connector should not have left/right extrema
-        # stub horizontally through neighbouring pins.
         if y_span <= edge_tol and x_span > edge_tol:
+            if abs(oy - py) <= edge_tol:
+                return ((1.0 if px >= ox else -1.0), 0.0)
             return (0.0, (1.0 if py >= oy else -1.0))
         if x_span > edge_tol:
             if abs(px - min_x) <= edge_tol:
