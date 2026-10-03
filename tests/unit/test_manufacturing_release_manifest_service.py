@@ -46,19 +46,20 @@ def test_release_manifest_requires_existing_release_files(tmp_path: Path) -> Non
     module = _module()
     context = _context(tmp_path)
     service = module.ReleaseManifestService()
+    empty_intent = FakeIntent({})
 
     with pytest.raises(
         module.ReleaseManifestPrerequisiteError,
         match="Output directory does not exist",
     ):
-        service.create_manifest(intent=FakeIntent({}), context=context)
+        service.create_manifest(intent=empty_intent, context=context)
 
     context.output_dir.mkdir()
     with pytest.raises(
         module.ReleaseManifestPrerequisiteError,
         match="No release files found in output directory",
     ):
-        service.create_manifest(intent=FakeIntent({}), context=context)
+        service.create_manifest(intent=empty_intent, context=context)
 
 
 def test_release_manifest_persists_deterministic_hash_and_provenance(tmp_path: Path) -> None:
