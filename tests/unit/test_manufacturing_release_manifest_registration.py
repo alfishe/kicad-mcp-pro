@@ -67,3 +67,24 @@ def test_registration_preserves_default_output_path() -> None:
     tool = server._tool_manager.list_tools()[0]
     assert tool.fn() == "manifest-result"
     assert service.calls[0][2] == ""
+
+
+def test_registration_formats_prerequisite_errors_without_changing_public_behavior() -> None:
+    adapter = _adapter()
+    server = FastMCP("manufacturing-release-manifest-error")
+
+    class FailingService:
+        def create_manifest(self, **_kwargs: object) -> str:
+            raise adapter.ReleaseManifestPrerequisiteError("missing release inputs")
+
+    adapter.register(
+        server,
+        adapter.ManufacturingReleaseManifestDependencies(
+            service=FailingService(),
+            intent_provider=lambda: object(),
+            context_provider=lambda: object(),
+        ),
+    )
+
+    tool = server._tool_manager.list_tools()[0]
+    assert tool.fn() == "missing release inputs"

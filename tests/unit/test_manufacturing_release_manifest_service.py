@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 
 def _module() -> ModuleType:
     spec = importlib.util.find_spec("kicad_mcp.manufacturing.release_manifest")
@@ -45,18 +47,18 @@ def test_release_manifest_requires_existing_release_files(tmp_path: Path) -> Non
     context = _context(tmp_path)
     service = module.ReleaseManifestService()
 
-    missing_dir = service.create_manifest(intent=FakeIntent({}), context=context)
-    assert missing_dir == (
-        f"Output directory does not exist: {context.output_dir}\n"
-        "Run export_manufacturing_package() first."
-    )
+    with pytest.raises(
+        module.ReleaseManifestPrerequisiteError,
+        match="Output directory does not exist",
+    ):
+        service.create_manifest(intent=FakeIntent({}), context=context)
 
     context.output_dir.mkdir()
-    no_files = service.create_manifest(intent=FakeIntent({}), context=context)
-    assert no_files == (
-        "No release files found in output directory.\n"
-        "Run export_manufacturing_package() first to generate Gerber/drill/BOM files."
-    )
+    with pytest.raises(
+        module.ReleaseManifestPrerequisiteError,
+        match="No release files found in output directory",
+    ):
+        service.create_manifest(intent=FakeIntent({}), context=context)
 
 
 def test_release_manifest_persists_deterministic_hash_and_provenance(tmp_path: Path) -> None:

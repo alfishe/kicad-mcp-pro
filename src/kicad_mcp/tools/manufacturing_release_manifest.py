@@ -15,6 +15,7 @@ from ..discovery import get_cli_capabilities
 from ..manufacturing.release_manifest import (
     DesignIntentLike,
     ReleaseManifestContext,
+    ReleaseManifestPrerequisiteError,
     ReleaseManifestService,
 )
 from ..project.design_spec import load_design_intent
@@ -73,8 +74,11 @@ def register(
         Returns:
             Confirmation with manifest path and file count.
         """
-        return deps.service.create_manifest(
-            intent=deps.intent_provider(),
-            context=deps.context_provider(),
-            output_path=output_path,
-        )
+        try:
+            return deps.service.create_manifest(
+                intent=deps.intent_provider(),
+                context=deps.context_provider(),
+                output_path=output_path,
+            )
+        except ReleaseManifestPrerequisiteError as exc:
+            return str(exc)

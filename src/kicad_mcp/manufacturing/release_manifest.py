@@ -10,11 +10,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from .release_evidence import find_release_files, sha256_file
+from .release_evidence import build_release_file_hashes, build_source_hashes, find_release_files
 
 
 class DesignIntentLike(Protocol):
     def model_dump(self) -> dict[str, Any]: ...
+
+
+class ReleaseManifestPrerequisiteError(RuntimeError):
+    """Raised when required manufacturing release inputs are unavailable."""
 
 
 @dataclass(frozen=True)
@@ -55,41 +59,29 @@ class ReleaseManifestService:
         _ = output_path
         out_dir = context.output_dir
         if not out_dir.exists():
-            return (
+            raise ReleaseManifestPrerequisiteError(
                 f"Output directory does not exist: {out_dir}\n"
                 "Run export_manufacturing_package() first."
             )
 
         release_files = find_release_files(out_dir)
         if not release_files:
-            return (
+            raise ReleaseManifestPrerequisiteError(
                 "No release files found in output directory.\n"
                 "Run export_manufacturing_package() first to generate Gerber/drill/BOM files."
             )
 
-        file_hashes: list[dict[str, str]] = sorted(
-            (
-                {
-                    "filename": path.name,
-                    "sha256": sha256_file(path),
-                    "size_bytes": str(path.stat().st_size),
-                }
-                for path in release_files
-            ),
-            key=lambda entry: entry["filename"],
-        )
+        file_hashes = build_release_file_hashes(release_files)
 
         intent_json = json.dumps(intent.model_dump(), sort_keys=True)
         intent_hash = hashlib.sha256(intent_json.encode()).hexdigest()[:16]
-        source_hashes = {
-            label: sha256_file(path)
-            for label, path in (
+        source_hashes = build_source_hashes(
+            [
                 ("project", context.project_file),
                 ("pcb", context.pcb_file),
                 ("schematic", context.sch_file),
-            )
-            if path is not None and path.exists()
-        }
+            ]
+        )
         provenance: dict[str, Any] = {
             "kicad_mcp_version": context.kicad_mcp_version,
             "kicad_cli": str(context.kicad_cli),
