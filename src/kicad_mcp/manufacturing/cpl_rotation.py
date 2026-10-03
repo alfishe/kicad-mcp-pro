@@ -105,9 +105,7 @@ class ManufacturingCplRotationService:
                 row[rot_col] = f"{corrected:.2f}"
                 corrected_count += 1
                 ref = row.get("Ref", "?")
-                preview_lines.append(
-                    f"{ref} | {pkg} | {orig:.2f}° | +{offset}° | {corrected:.2f}°"
-                )
+                preview_lines.append(f"{ref} | {pkg} | {orig:.2f}° | +{offset}° | {corrected:.2f}°")
 
         if output_path:
             out_path = self.resolve_path(output_path)
