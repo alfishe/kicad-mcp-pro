@@ -84,7 +84,7 @@ def test_release_manifest_persists_deterministic_hash_and_provenance(tmp_path: P
     assert first_payload["generated_utc"] != second_payload["generated_utc"]
     assert first_payload["provenance"] == {
         "kicad_mcp_version": "3.37.0",
-        "kicad_cli": "/usr/bin/kicad-cli",
+        "kicad_cli": str(context.kicad_cli),
         "kicad_cli_version": "10.0.6",
         "intent_hash": first_payload["intent_hash"],
         "source_hashes": {
