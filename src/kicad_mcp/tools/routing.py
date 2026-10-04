@@ -20,7 +20,7 @@ from ..routing.specctra_staging import relative_project_path
 from ..utils.freerouting import FreeRoutingRunner
 from ..utils.router_core import apply_ses_to_pcb
 from .export_support import _get_pcb_file
-from .metadata import headless_compatible, requires_dependency, requires_kicad_running
+from .metadata import headless_compatible, requires_dependency
 from .pcb import _current_stackup_specs, _impedance_context_for_layer, _transactional_board_write
 from .project import load_design_intent as _load_design_intent
 from .routing_rules import _load_rules_content, _mm, _rules_file_path, _upsert_rule, _write_rule
