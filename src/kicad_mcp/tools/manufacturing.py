@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, Literal
 
 import structlog
@@ -26,41 +25,6 @@ from .metadata import headless_compatible
 logger = structlog.get_logger(__name__)
 
 PanelLayout = Literal["grid", "mousebites", "vcut"]
-
-# Path to the rotation correction table
-_ROTATIONS_JSON = Path(__file__).parent.parent / "dfm_profiles" / "jlcpcb_rotations.json"
-
-
-def _load_rotation_table() -> list[dict[str, Any]]:
-    """Load JLCPCB rotation correction entries from the bundled JSON."""
-    try:
-        data = json.loads(_ROTATIONS_JSON.read_text(encoding="utf-8"))
-        entries = data.get("entries", [])
-        if isinstance(entries, list):
-            return [entry for entry in entries if isinstance(entry, dict)]
-        return []
-    except (OSError, json.JSONDecodeError):
-        return []
-
-
-def _find_rotation_offset(
-    footprint_name: str,
-    table: list[dict[str, Any]],
-) -> int | None:
-    """Return the rotation offset (degrees) for a footprint, or None if not found.
-
-    Matching is case-insensitive substring: the pattern must appear in the
-    footprint name.  More specific patterns (longer) take precedence.
-    """
-    name_upper = footprint_name.upper()
-    best: tuple[int, int] | None = None  # (length, offset)
-    for entry in table:
-        pattern = entry.get("pattern", "").upper()
-        if pattern and pattern in name_upper:
-            length = len(pattern)
-            if best is None or length > best[0]:
-                best = (length, int(entry.get("offset_deg", 0)))
-    return best[1] if best else None
 
 
 def register(mcp: FastMCP) -> None:
@@ -192,134 +156,9 @@ def register(mcp: FastMCP) -> None:
             + ("…" if len(file_hashes) > 10 else "")
         )
 
-    @mcp.tool()
-    @headless_compatible
-    def mfg_correct_cpl_rotations(
-        cpl_csv_path: str,
-        output_path: str = "",
-        dry_run: bool = True,
-        confirm: bool = False,
-    ) -> str:
-        """Apply JLCPCB CPL rotation corrections to a KiCad-exported pick-and-place CSV.
+    from . import manufacturing_cpl_rotation
 
-        KiCad exports component orientations relative to its own coordinate system,
-        which differs from what JLCPCB's SMT assembly service expects.  This tool
-        reads a CPL CSV (produced by export_pos), applies per-footprint rotation
-        offsets from the bundled ``jlcpcb_rotations.json`` table, and writes a
-        corrected CSV ready for direct upload to JLCPCB.
-
-        Columns expected (KiCad default CPL export):
-            Ref, Val, Package, PosX, PosY, Rot, Side
-
-        Args:
-            cpl_csv_path: Path to the CPL CSV file (relative to project dir).
-            output_path: Output path for the corrected CSV.  Defaults to
-                ``<stem>_jlcpcb_corrected.csv`` next to the input file.
-            dry_run: If True, return a preview table without writing the file.
-            confirm: Must be True when ``dry_run`` is False and a file will be written.
-
-        Returns:
-            Summary of corrections applied, or a preview table for dry_run.
-        """
-        import csv
-
-        cfg = get_config()
-        in_path = cfg.resolve_within_project(cpl_csv_path)
-
-        if not in_path.exists():
-            return f"CPL file not found: {in_path}"
-
-        table = _load_rotation_table()
-        if not table:
-            return "Could not load rotation table from jlcpcb_rotations.json."
-
-        # Parse CSV
-        rows: list[dict[str, str]] = []
-        try:
-            with in_path.open(newline="", encoding="utf-8") as fh:
-                reader = csv.DictReader(fh)
-                if reader.fieldnames is None:
-                    return "CPL CSV has no header row."
-                fieldnames = list(reader.fieldnames)
-                rows = list(reader)
-        except (OSError, csv.Error) as exc:
-            return f"Failed to read CPL CSV: {exc}"
-
-        # Detect rotation column name (KiCad uses 'Rot' or 'Rotation')
-        rot_col = "Rot"
-        pkg_col = "Package"
-        for col in fieldnames:
-            if col.lower() in ("rot", "rotation"):
-                rot_col = col
-            if col.lower() in ("package", "footprint"):
-                pkg_col = col
-
-        if rot_col not in fieldnames:
-            return f"Rotation column ('{rot_col}') not found in CSV. Columns: {fieldnames}"
-        if pkg_col not in fieldnames:
-            return f"Package column ('{pkg_col}') not found in CSV. Columns: {fieldnames}"
-
-        corrected_count = 0
-        preview_lines: list[str] = ["Ref | Package | Original Rot | Offset | Corrected Rot"]
-        preview_lines.append("----|---------|-------------|--------|---------------")
-
-        for row in rows:
-            pkg = row.get(pkg_col, "")
-            offset = _find_rotation_offset(pkg, table)
-            if offset is not None and offset != 0:
-                try:
-                    orig = float(row[rot_col])
-                except ValueError:
-                    continue
-                corrected = (orig + offset) % 360
-                row[rot_col] = f"{corrected:.2f}"
-                corrected_count += 1
-                ref = row.get("Ref", "?")
-                preview_lines.append(f"{ref} | {pkg} | {orig:.2f}° | +{offset}° | {corrected:.2f}°")
-
-        if output_path:
-            out_path = cfg.resolve_within_project(output_path)
-        else:
-            out_path = in_path.parent / f"{in_path.stem}_jlcpcb_corrected.csv"
-
-        if dry_run:
-            if corrected_count == 0:
-                return "No rotation corrections needed for any component."
-            return (
-                f"Dry run: {corrected_count} component(s) would be corrected.\n"
-                f"Output would be: {out_path}\n\n"
-                + "\n".join(preview_lines[:50])
-                + ("\n...(truncated)" if len(preview_lines) > 50 else "")
-            )
-        if not confirm:
-            return (
-                "CPL rotation correction writes a new CSV and requires explicit confirmation.\n"
-                f"- Intended output: {out_path}\n"
-                "Rerun with dry_run=false and confirm=true."
-            )
-        if out_path.exists():
-            return (
-                "Refusing to overwrite an existing corrected CPL CSV.\n"
-                f"- Existing file: {out_path}\n"
-                "Choose a different output_path."
-            )
-
-        # Write corrected CSV
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with out_path.open("w", newline="", encoding="utf-8") as fh:
-                writer = csv.DictWriter(fh, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(rows)
-        except OSError as exc:
-            return f"Failed to write corrected CPL CSV: {exc}"
-
-        return (
-            f"CPL rotation corrections applied: {corrected_count} component(s) corrected.\n"
-            f"Output: {out_path}\n\n"
-            + "\n".join(preview_lines[:30])
-            + ("\n…" if len(preview_lines) > 30 else "")
-        )
+    manufacturing_cpl_rotation.register(mcp)
 
     from . import manufacturing_imports
 
