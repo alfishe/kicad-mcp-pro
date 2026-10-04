@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+
+import pytest
 
 from mcp.server.mcpserver import MCPServer as FastMCP
 
@@ -75,3 +77,34 @@ def test_registration_preserves_public_tool_contract_and_delegates() -> None:
             "confirm": True,
         }
     ]
+
+
+def test_runner_rejects_untrusted_command_shapes_and_uses_shell_free_argv(monkeypatch) -> None:
+    adapter = _adapter()
+
+    with pytest.raises(ValueError, match="only the KiKit panelize command"):
+        adapter._run_kikit(["python", "-c", "print('no')"])
+    with pytest.raises(ValueError, match="valid strings"):
+        adapter._run_kikit(["kikit", "panelize", "bad\x00path"])
+
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd: list[str], **kwargs: object) -> SimpleNamespace:
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(adapter.subprocess, "run", fake_run)
+
+    result = adapter._run_kikit(["kikit", "panelize", "input.kicad_pcb", "output.kicad_pcb"])
+
+    assert result.returncode == 0
+    assert captured["cmd"] == ["kikit", "panelize", "input.kicad_pcb", "output.kicad_pcb"]
+    assert captured["kwargs"] == {
+        "capture_output": True,
+        "text": True,
+        "errors": "replace",
+        "timeout": 120,
+        "shell": False,
+        "check": False,
+    }
