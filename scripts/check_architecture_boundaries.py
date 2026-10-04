@@ -49,6 +49,8 @@ _ROUTING_TUNING_PROFILES_ADAPTER = "kicad_mcp.tools.routing_tuning_profiles"
 _ROUTING_SPECCTRA_STAGING_ADAPTER = "kicad_mcp.tools.routing_specctra_staging"
 _ROUTING_NET_CLASS_RULES_ADAPTER = "kicad_mcp.tools.routing_net_class_rules"
 _ROUTING_DIFFERENTIAL_PAIR_ADAPTER = "kicad_mcp.tools.routing_differential_pair"
+_ROUTING_LENGTH_TUNING_ADAPTER = "kicad_mcp.tools.routing_length_tuning"
+_ROUTING_DIFF_PAIR_LENGTH_ADAPTER = "kicad_mcp.tools.routing_diff_pair_length"
 
 DOMAIN_MODULES = {
     "kicad_mcp.ir.engineering_graph": SRC_ROOT / "kicad_mcp" / "ir" / "engineering_graph.py",
@@ -199,6 +201,7 @@ DOMAIN_MODULES = {
     / "kicad_mcp"
     / "routing"
     / "differential_pair_rules.py",
+    "kicad_mcp.routing.length_tuning": SRC_ROOT / "kicad_mcp" / "routing" / "length_tuning.py",
     _ROUTING_TUNING_PROFILES_ADAPTER: SRC_ROOT
     / "kicad_mcp"
     / "tools"
@@ -215,6 +218,11 @@ DOMAIN_MODULES = {
     / "kicad_mcp"
     / "tools"
     / "routing_differential_pair.py",
+    _ROUTING_LENGTH_TUNING_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "routing_length_tuning.py",
+    _ROUTING_DIFF_PAIR_LENGTH_ADAPTER: SRC_ROOT
+    / "kicad_mcp"
+    / "tools"
+    / "routing_diff_pair_length.py",
     _PROJECT_CONTEXT_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_context.py",
     _PROJECT_CREATION_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_creation.py",
     _PROJECT_DESIGN_SPEC_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_design_spec.py",
@@ -443,6 +451,7 @@ PURE_HELPERS = {
     "kicad_mcp.routing.specctra_staging",
     "kicad_mcp.routing.net_class_rules",
     "kicad_mcp.routing.differential_pair_rules",
+    "kicad_mcp.routing.length_tuning",
     "kicad_mcp.manufacturing.cpl_rotation",
     "kicad_mcp.manufacturing.panelization",
     "kicad_mcp.manufacturing.imports",
@@ -538,6 +547,8 @@ ADAPTER_FORBIDDEN_IMPORT_PREFIXES = {
     _ROUTING_SPECCTRA_STAGING_ADAPTER: (_ROUTING_ROOT_MODULE,),
     _ROUTING_NET_CLASS_RULES_ADAPTER: (_ROUTING_ROOT_MODULE,),
     _ROUTING_DIFFERENTIAL_PAIR_ADAPTER: (_ROUTING_ROOT_MODULE,),
+    _ROUTING_LENGTH_TUNING_ADAPTER: (_ROUTING_ROOT_MODULE,),
+    _ROUTING_DIFF_PAIR_LENGTH_ADAPTER: (_ROUTING_ROOT_MODULE,),
     _MANUFACTURING_RELEASE_EVIDENCE_ADAPTER: (_MANUFACTURING_ROOT_MODULE,),
     _MANUFACTURING_RELEASE_MANIFEST_ADAPTER: (_MANUFACTURING_ROOT_MODULE,),
     _MANUFACTURING_TEST_PLAN_ADAPTER: (_MANUFACTURING_ROOT_MODULE,),
@@ -633,11 +644,13 @@ REGISTER_LINE_LIMITS = {
     _MANUFACTURING_RELEASE_EVIDENCE_ADAPTER: 90,
     _MANUFACTURING_RELEASE_MANIFEST_ADAPTER: 75,
     _MANUFACTURING_TEST_PLAN_ADAPTER: 80,
-    _ROUTING_ROOT_MODULE: 740,
+    _ROUTING_ROOT_MODULE: 700,
     _ROUTING_TUNING_PROFILES_ADAPTER: 95,
     _ROUTING_SPECCTRA_STAGING_ADAPTER: 80,
     _ROUTING_NET_CLASS_RULES_ADAPTER: 75,
     _ROUTING_DIFFERENTIAL_PAIR_ADAPTER: 80,
+    _ROUTING_LENGTH_TUNING_ADAPTER: 75,
+    _ROUTING_DIFF_PAIR_LENGTH_ADAPTER: 75,
     _PROJECT_CONTEXT_ADAPTER: 55,
     _PROJECT_CREATION_ADAPTER: 55,
     _PROJECT_DESIGN_SPEC_ADAPTER: 120,

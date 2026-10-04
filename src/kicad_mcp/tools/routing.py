@@ -76,42 +76,6 @@ def _current_track_length_for_pattern_mm(net_pattern: str) -> float:
     return sum(_current_track_length_mm(name) for name in matching_names)
 
 
-def _length_tune_rule_body(net_name: str, target_mm: float, tolerance_mm: float) -> tuple[str, str]:
-    name = f"Length tune {net_name}"
-    body = "\n".join(
-        [
-            f"(rule {_sexpr_string(name)}",
-            f"  (condition \"A.NetName == '{net_name}'\")",
-            f"  (constraint length (min {_mm(max(target_mm - tolerance_mm, 0.0))}) "
-            f"(opt {_mm(target_mm)}) (max {_mm(target_mm + tolerance_mm)}))",
-            ")",
-        ]
-    )
-    return name, body
-
-
-def _diff_pair_length_rule_body(
-    net_name_p: str,
-    net_name_n: str,
-    target_length_mm: float,
-) -> list[tuple[str, str]]:
-    rules = [
-        _length_tune_rule_body(net_name_p, target_length_mm, 0.1),
-        _length_tune_rule_body(net_name_n, target_length_mm, 0.1),
-    ]
-    pair_rule_name = f"Length match {net_name_p} {net_name_n}"
-    pair_rule_body = "\n".join(
-        [
-            f"(rule {_sexpr_string(pair_rule_name)}",
-            f"  (condition \"A.NetName == '{net_name_p}' || A.NetName == '{net_name_n}'\")",
-            "  (constraint skew (max 0.1000mm))",
-            ")",
-        ]
-    )
-    rules.append((pair_rule_name, pair_rule_body))
-    return rules
-
-
 def _relative_project_path(path: Path) -> str:
     return relative_project_path(path, get_config().project_root)
 
@@ -560,38 +524,16 @@ def register(mcp: FastMCP) -> None:
         ),
     )
 
-    @mcp.tool()
-    @headless_compatible
-    def route_tune_length(
-        net_name: str,
-        target_mm: float,
-        meander_amplitude_mm: float = 0.5,
-        tolerance_mm: float = 0.1,
-    ) -> str:
-        """Write a length-tuning rule and report the current delta for a net."""
-        board_nets = _list_board_net_names()
-        if net_name not in board_nets:
-            return (
-                "Length-tuning rule was not written. "
-                f"Net '{net_name}' was not found on the active board."
-            )
+    from . import routing_length_tuning
 
-        current_length = _current_track_length_mm(net_name)
-        delta = target_mm - current_length
-        rule_name, rule_body = _length_tune_rule_body(net_name, target_mm, tolerance_mm)
-        try:
-            path = _write_rule(rule_name, rule_body)
-        except (OSError, ValueError) as exc:
-            return f"Length-tuning rule update failed: {exc}"
-
-        status = "within tolerance" if abs(delta) <= tolerance_mm else "needs tuning"
-        return (
-            f"Length-tuning rule '{rule_name}' written to {path}.\n"
-            f"Current length: {current_length:.3f} mm\n"
-            f"Target length: {target_mm:.3f} mm\n"
-            f"Delta: {delta:.3f} mm ({status})\n"
-            f"Suggested meander amplitude: {meander_amplitude_mm:.3f} mm"
-        )
+    routing_length_tuning.register(
+        mcp,
+        routing_length_tuning.dependencies(
+            list_board_net_names=lambda: _list_board_net_names(),
+            current_track_length_mm=lambda net_name: _current_track_length_mm(net_name),
+            write_rule=lambda name, body: _write_rule(name, body),
+        ),
+    )
 
     from . import routing_tuning_profiles
 
@@ -698,41 +640,16 @@ def register(mcp: FastMCP) -> None:
             lines.append(f"Fallback target length: {target_mm:.3f} mm")
         return "\n".join(lines)
 
-    @mcp.tool()
-    @headless_compatible
-    def tune_diff_pair_length(net_name_p: str, net_name_n: str, target_length_mm: float) -> str:
-        """Write matched-length rules for both nets in a differential pair."""
-        board_nets = _list_board_net_names()
-        missing = [name for name in (net_name_p, net_name_n) if name not in board_nets]
-        if missing:
-            return (
-                "Differential-pair length tuning rules were not written. "
-                f"Missing nets: {', '.join(missing)}"
-            )
+    from . import routing_diff_pair_length
 
-        written_paths: list[str] = []
-        for rule_name, rule_body in _diff_pair_length_rule_body(
-            net_name_p,
-            net_name_n,
-            target_length_mm,
-        ):
-            try:
-                path = _write_rule(rule_name, rule_body)
-            except (OSError, ValueError) as exc:
-                return f"Differential-pair length tuning failed: {exc}"
-            written_paths.append(str(path))
-
-        current_p = _current_track_length_mm(net_name_p)
-        current_n = _current_track_length_mm(net_name_n)
-        skew = abs(current_p - current_n)
-        return (
-            "Differential-pair length rules updated.\n"
-            f"Rules file: {written_paths[-1]}\n"
-            f"{net_name_p}: {current_p:.3f} mm\n"
-            f"{net_name_n}: {current_n:.3f} mm\n"
-            f"Current skew: {skew:.3f} mm\n"
-            f"Target length: {target_length_mm:.3f} mm"
-        )
+    routing_diff_pair_length.register(
+        mcp,
+        routing_diff_pair_length.dependencies(
+            list_board_net_names=lambda: _list_board_net_names(),
+            current_track_length_mm=lambda net_name: _current_track_length_mm(net_name),
+            write_rule=lambda name, body: _write_rule(name, body),
+        ),
+    )
 
     @mcp.tool()
     @headless_compatible
