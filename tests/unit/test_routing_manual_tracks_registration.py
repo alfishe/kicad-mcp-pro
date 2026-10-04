@@ -53,9 +53,7 @@ class FakeService:
 def test_adapter_maps_track_spec_to_kipy_track() -> None:
     adapter = _adapter()
 
-    track = adapter._track_from_spec(
-        TrackSpec(1.0, 2.0, 5.0, 8.0, "F_Cu", 0.3, "USB_D+")
-    )
+    track = adapter._track_from_spec(TrackSpec(1.0, 2.0, 5.0, 8.0, "F_Cu", 0.3, "USB_D+"))
 
     assert point_xy_mm(track.start) == (1.0, 2.0)
     assert point_xy_mm(track.end) == (5.0, 8.0)
