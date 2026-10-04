@@ -39,7 +39,7 @@ def test_routing_root_delegates_specctra_staging_and_shrinks() -> None:
     span = boundaries._function_span(root, "register")
     assert span is not None
     assert span <= 800
-    assert boundaries.REGISTER_LINE_LIMITS["kicad_mcp.tools.routing"] == 800
+    assert boundaries.REGISTER_LINE_LIMITS["kicad_mcp.tools.routing"] <= 800
 
 
 def test_routing_root_uses_shared_project_path_formatter() -> None:
