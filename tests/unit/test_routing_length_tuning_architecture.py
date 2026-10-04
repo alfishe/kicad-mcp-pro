@@ -60,5 +60,5 @@ def test_routing_root_drops_length_rule_builders_and_preserves_registration_orde
     profiles = source.index("routing_tuning_profiles.register(mcp)")
     time_domain = source.index("def route_tune_time_domain(")
     pair = source.index("routing_diff_pair_length.register(")
-    constraints = source.index("def generate_board_constraints(")
+    constraints = source.index("routing_board_constraints.register(")
     assert single < profiles < time_domain < pair < constraints
