@@ -22,7 +22,6 @@ type CollectionItemKind = Literal["string", "boolean", "number", "object", "unkn
 type BreadthDimension = Literal["item_count", "path_count"]
 
 
-
 @dataclass(frozen=True)
 class PathArgumentEffect:
     argument: str
@@ -117,9 +116,7 @@ REVIEWED_TOOL_EFFECTS: tuple[ReviewedToolEffect, ...] = (
                 base_argument="path",
             ),
         ),
-        argument_shapes=(
-            ArgumentShapeFact(argument="confirm_overwrite", value_kind="boolean"),
-        ),
+        argument_shapes=(ArgumentShapeFact(argument="confirm_overwrite", value_kind="boolean"),),
         destructive=True,
         idempotent=False,
         supports_dry_run=False,
