@@ -62,7 +62,8 @@ def test_apply_preserves_missing_file_message(tmp_path: Path) -> None:
     result = service.apply()
 
     assert result.ok is False
-    assert result.errors == ["Routed SES not found: output/routing/board.ses"]
+    relative_ses = str(Path("output") / "routing" / "board.ses")
+    assert result.errors == [f"Routed SES not found: {relative_ses}"]
 
 
 def test_apply_preserves_invalid_path_message(tmp_path: Path) -> None:
@@ -87,8 +88,9 @@ def test_apply_preserves_empty_route_failure(tmp_path: Path) -> None:
     result = service.apply()
 
     assert result.ok is False
+    relative_ses = str(Path("output") / "routing" / "board.ses")
     assert result.errors == [
-        "The session at output/routing/board.ses contained no routed segments or vias."
+        f"The session at {relative_ses} contained no routed segments or vias."
     ]
 
 
