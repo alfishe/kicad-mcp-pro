@@ -4,21 +4,28 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
-
-from kipy.board_types import Net, Track
-from kipy.geometry import Vector2
-from kipy.proto.board.board_types_pb2 import BoardLayer
 
 from ..models.common import _PadLike
 from ..models.pcb import AddTrackInput
 from ..pcb.geometry import point_xy_mm
-from ..utils.units import mm_to_nm
 
-LayerResolver = Callable[[str], BoardLayer.ValueType]
 PadProvider = Callable[[], Iterable[_PadLike]]
-MutationCommand = Callable[[Any], list[Any]]
-MutationExecutor = Callable[[str, MutationCommand], Any]
+
+
+@dataclass(frozen=True)
+class TrackSpec:
+    """Transport-neutral track description for live-board infrastructure."""
+
+    x1_mm: float
+    y1_mm: float
+    x2_mm: float
+    y2_mm: float
+    layer: str
+    width_mm: float
+    net_name: str = ""
+
+
+TrackWriter = Callable[[str, list[TrackSpec]], None]
 
 
 def _find_pad(
@@ -34,29 +41,24 @@ def _find_pad(
     return None
 
 
-def _track_from_payload(
-    payload: AddTrackInput,
-    resolve_layer: LayerResolver,
-) -> Track:
-    track = Track()
-    track.start = Vector2.from_xy_mm(payload.x1_mm, payload.y1_mm)
-    track.end = Vector2.from_xy_mm(payload.x2_mm, payload.y2_mm)
-    track.layer = resolve_layer(payload.layer)
-    track.width = mm_to_nm(payload.width_mm)
-    if payload.net_name:
-        net = Net()
-        net.name = payload.net_name
-        track.net = net
-    return track
+def _spec_from_payload(payload: AddTrackInput) -> TrackSpec:
+    return TrackSpec(
+        x1_mm=payload.x1_mm,
+        y1_mm=payload.y1_mm,
+        x2_mm=payload.x2_mm,
+        y2_mm=payload.y2_mm,
+        layer=payload.layer,
+        width_mm=payload.width_mm,
+        net_name=payload.net_name,
+    )
 
 
 @dataclass(frozen=True)
 class RoutingManualTrackService:
-    """Create direct and pad-to-pad tracks through injected board infrastructure."""
+    """Create direct and pad-to-pad track specs through injected board infrastructure."""
 
-    resolve_layer: LayerResolver
     list_pads: PadProvider
-    execute_mutation: MutationExecutor
+    write_tracks: TrackWriter
 
     def route_single(
         self,
@@ -77,11 +79,7 @@ class RoutingManualTrackService:
             width_mm=width_mm,
             net_name=net_name,
         )
-        track = _track_from_payload(payload, self.resolve_layer)
-        self.execute_mutation(
-            "route_single_track",
-            lambda board: list(board.create_items([track])),
-        )
+        self.write_tracks("route_single_track", [_spec_from_payload(payload)])
         return "Single track routed successfully."
 
     def route_pad_to_pad(
@@ -101,31 +99,31 @@ class RoutingManualTrackService:
         start_x, start_y = point_xy_mm(start_pad.position)
         end_x, end_y = point_xy_mm(end_pad.position)
         net_name = start_pad.net.name or end_pad.net.name or ""
-        payloads = [
-            AddTrackInput(
-                x1_mm=start_x,
-                y1_mm=start_y,
-                x2_mm=end_x,
-                y2_mm=start_y,
-                layer=layer,
-                width_mm=width_mm,
-                net_name=net_name,
+        specs = [
+            _spec_from_payload(
+                AddTrackInput(
+                    x1_mm=start_x,
+                    y1_mm=start_y,
+                    x2_mm=end_x,
+                    y2_mm=start_y,
+                    layer=layer,
+                    width_mm=width_mm,
+                    net_name=net_name,
+                )
             ),
-            AddTrackInput(
-                x1_mm=end_x,
-                y1_mm=start_y,
-                x2_mm=end_x,
-                y2_mm=end_y,
-                layer=layer,
-                width_mm=width_mm,
-                net_name=net_name,
+            _spec_from_payload(
+                AddTrackInput(
+                    x1_mm=end_x,
+                    y1_mm=start_y,
+                    x2_mm=end_x,
+                    y2_mm=end_y,
+                    layer=layer,
+                    width_mm=width_mm,
+                    net_name=net_name,
+                )
             ),
         ]
-        tracks = [_track_from_payload(payload, self.resolve_layer) for payload in payloads]
-        self.execute_mutation(
-            "route_from_pad_to_pad",
-            lambda board: list(board.create_items(tracks)),
-        )
+        self.write_tracks("route_from_pad_to_pad", specs)
         return (
             f"Created an orthogonal two-segment route from {ref1}:{pad1} to {ref2}:{pad2}. "
             "Run DRC to verify the path."

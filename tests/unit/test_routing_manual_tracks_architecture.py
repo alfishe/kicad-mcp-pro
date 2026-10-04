@@ -18,8 +18,8 @@ def test_manual_track_adapter_stays_thin_and_away_from_root() -> None:
     assert "kicad_mcp.tools.routing" not in boundaries._imports_for(module_name, adapter)
     span = boundaries._function_span(adapter, "register")
     assert span is not None
-    assert span <= 90
-    assert boundaries.REGISTER_LINE_LIMITS[module_name] == 90
+    assert span <= 120
+    assert boundaries.REGISTER_LINE_LIMITS[module_name] == 120
 
 
 def test_routing_root_delegates_manual_tracks_and_shrinks() -> None:

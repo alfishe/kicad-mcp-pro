@@ -7,7 +7,11 @@ from types import ModuleType
 
 from mcp.server.mcpserver import MCPServer as FastMCP
 
+from kicad_mcp.pcb.geometry import point_xy_mm
+from kicad_mcp.routing.manual_tracks import TrackSpec
 from kicad_mcp.tools.metadata import get_tool_metadata
+from kicad_mcp.utils.layers import resolve_layer
+from kicad_mcp.utils.units import mm_to_nm
 
 
 def _adapter() -> ModuleType:
@@ -44,6 +48,20 @@ class FakeService:
     ) -> str:
         self.calls.append(("pads", ref1, pad1, ref2, pad2, layer, width_mm))
         return "pads-delegated"
+
+
+def test_adapter_maps_track_spec_to_kipy_track() -> None:
+    adapter = _adapter()
+
+    track = adapter._track_from_spec(
+        TrackSpec(1.0, 2.0, 5.0, 8.0, "F_Cu", 0.3, "USB_D+")
+    )
+
+    assert point_xy_mm(track.start) == (1.0, 2.0)
+    assert point_xy_mm(track.end) == (5.0, 8.0)
+    assert track.layer == resolve_layer("F_Cu")
+    assert track.width == mm_to_nm(0.3)
+    assert track.net.name == "USB_D+"
 
 
 def test_registration_preserves_order_signatures_metadata_and_delegation() -> None:

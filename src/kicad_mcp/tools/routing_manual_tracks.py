@@ -7,14 +7,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
+from kipy.board_types import Net, Track
+from kipy.geometry import Vector2
 from mcp.server.mcpserver import MCPServer as FastMCP
 
 from ..connection import get_board
 from ..models.common import _PadLike
 from ..pcb.board_access import board_pads
 from ..pcb.live_edit_runtime import execute_live_board_mutation
-from ..routing.manual_tracks import RoutingManualTrackService
+from ..routing.manual_tracks import RoutingManualTrackService, TrackSpec
 from ..utils.layers import resolve_layer
+from ..utils.units import mm_to_nm
 from .metadata import requires_kicad_running
 
 
@@ -23,16 +26,33 @@ class RoutingManualTrackDependencies:
     service: RoutingManualTrackService
 
 
+def _track_from_spec(spec: TrackSpec) -> Track:
+    track = Track()
+    track.start = Vector2.from_xy_mm(spec.x1_mm, spec.y1_mm)
+    track.end = Vector2.from_xy_mm(spec.x2_mm, spec.y2_mm)
+    track.layer = resolve_layer(spec.layer)
+    track.width = mm_to_nm(spec.width_mm)
+    if spec.net_name:
+        net = Net()
+        net.name = spec.net_name
+        track.net = net
+    return track
+
+
+def _write_tracks(operation: str, specs: list[TrackSpec]) -> None:
+    tracks = [_track_from_spec(spec) for spec in specs]
+    execute_live_board_mutation(
+        operation,
+        lambda board: list(board.create_items(tracks)),
+        verifier=None,
+    )
+
+
 def _default_dependencies() -> RoutingManualTrackDependencies:
     return RoutingManualTrackDependencies(
         service=RoutingManualTrackService(
-            resolve_layer=resolve_layer,
             list_pads=lambda: cast(list[_PadLike], board_pads(get_board())),
-            execute_mutation=lambda operation, command: execute_live_board_mutation(
-                operation,
-                command,
-                verifier=None,
-            ),
+            write_tracks=_write_tracks,
         )
     )
 
