@@ -27,9 +27,7 @@ class FakeService:
         meander_amplitude_mm: float,
         tolerance_mm: float,
     ) -> str:
-        self.calls.append(
-            ("single", net_name, target_mm, meander_amplitude_mm, tolerance_mm)
-        )
+        self.calls.append(("single", net_name, target_mm, meander_amplitude_mm, tolerance_mm))
         return "single-delegated"
 
     def tune_diff_pair(
