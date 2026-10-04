@@ -11,7 +11,6 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer as FastMCP
 
 
-
 def register(mcp: FastMCP) -> None:
     """Register manufacturing tools."""
 
