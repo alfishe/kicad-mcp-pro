@@ -28,6 +28,7 @@ logger = structlog.get_logger(__name__)
 
 PanelLayout = Literal["grid", "mousebites", "vcut"]
 
+
 def _kikit_available() -> bool:
     return shutil.which("kikit") is not None
 
