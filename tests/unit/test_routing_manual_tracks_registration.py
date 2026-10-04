@@ -30,9 +30,7 @@ class FakeService:
         width_mm: float = 0.25,
         net_name: str = "",
     ) -> str:
-        self.calls.append(
-            ("single", x1_mm, y1_mm, x2_mm, y2_mm, layer, width_mm, net_name)
-        )
+        self.calls.append(("single", x1_mm, y1_mm, x2_mm, y2_mm, layer, width_mm, net_name))
         return "single-delegated"
 
     def route_pad_to_pad(
