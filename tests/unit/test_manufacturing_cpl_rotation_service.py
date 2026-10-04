@@ -136,4 +136,7 @@ def test_rotation_table_failures_and_non_numeric_rotation_are_preserved(
     cpl = tmp_path / "output" / "invalid-rotation.csv"
     cpl.parent.mkdir(parents=True, exist_ok=True)
     cpl.write_text("Ref,Package,Rot\nD1,SOT-23-3,not-a-number\n", encoding="utf-8")
-    assert (\n        service.correct("output/invalid-rotation.csv")\n        == "No rotation corrections needed for any component."\n    )
+    assert (
+        service.correct("output/invalid-rotation.csv")
+        == "No rotation corrections needed for any component."
+    )
