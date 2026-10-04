@@ -52,8 +52,7 @@ def build_differential_pair_rule(
         f"(opt {_mm(width_mm)}) (max {_mm(width_mm)}))"
     )
     gap_constraint = (
-        f"  (constraint diff_pair_gap (min {_mm(gap_mm)}) "
-        f"(opt {_mm(gap_mm)}) (max {_mm(gap_mm)}))"
+        f"  (constraint diff_pair_gap (min {_mm(gap_mm)}) (opt {_mm(gap_mm)}) (max {_mm(gap_mm)}))"
     )
     name = f"Differential pair {net_p} {net_n}"
     body = "\n".join(

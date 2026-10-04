@@ -53,6 +53,4 @@ def register(
         length_tolerance_mm: float = 0.1,
     ) -> str:
         """Write differential-pair routing constraints for a pair of nets."""
-        return deps.service.set_pair(
-            net_p, net_n, layer, width_mm, gap_mm, length_tolerance_mm
-        )
+        return deps.service.set_pair(net_p, net_n, layer, width_mm, gap_mm, length_tolerance_mm)

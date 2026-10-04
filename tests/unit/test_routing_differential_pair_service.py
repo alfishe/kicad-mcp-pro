@@ -22,7 +22,7 @@ def test_build_differential_pair_rule_preserves_legacy_body() -> None:
     assert body == "\n".join(
         [
             '(rule "Differential pair USB_DP USB_DN"',
-            '  (condition "A.inDiffPair(\'USB\')")',
+            "  (condition \"A.inDiffPair('USB')\")",
             "  (constraint track_width (min 0.1600mm) (opt 0.1600mm) (max 0.1600mm))",
             "  (constraint diff_pair_gap (min 0.1800mm) (opt 0.1800mm) (max 0.1800mm))",
             "  (constraint skew (max 0.1000mm))",
@@ -33,7 +33,7 @@ def test_build_differential_pair_rule_preserves_legacy_body() -> None:
 
 def test_build_differential_pair_rule_preserves_explicit_net_fallback() -> None:
     _name, body = build_differential_pair_rule("NET_A", "NET_B", 0.2, 0.2, 0.1)
-    assert 'A.NetName == \'NET_A\' || A.NetName == \'NET_B\'' in body
+    assert "A.NetName == 'NET_A' || A.NetName == 'NET_B'" in body
 
 
 def test_set_pair_preserves_missing_net_message() -> None:
@@ -64,6 +64,7 @@ def test_set_pair_preserves_success_response(tmp_path: Path) -> None:
 def test_set_pair_preserves_writer_failure_text() -> None:
     def fail(_name: str, _body: str) -> Path:
         raise ValueError("bad rules")
+
     service = RoutingDifferentialPairService(
         list_board_net_names=lambda: {"USB_DP", "USB_DN"},
         write_rule=fail,
