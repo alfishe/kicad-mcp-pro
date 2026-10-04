@@ -43,10 +43,12 @@ def test_routing_root_delegates_tuning_profile_crud_and_shrinks() -> None:
     assert boundaries.REGISTER_LINE_LIMITS["kicad_mcp.tools.routing"] <= 850
 
 
-def test_routing_root_uses_canonical_tuning_profile_reader() -> None:
+def test_time_domain_service_uses_canonical_tuning_profile_reader() -> None:
+    service = boundaries.DOMAIN_MODULES["kicad_mcp.routing.time_domain_tuning"]
+    service_source = service.read_text(encoding="utf-8")
     root = boundaries.DOMAIN_MODULES["kicad_mcp.tools.routing"]
-    source = root.read_text(encoding="utf-8")
+    root_source = root.read_text(encoding="utf-8")
 
-    assert "load_tuning_profiles(get_config().project_dir)" in source
-    assert "def _load_state_file(" not in source
-    assert "def _save_state_file(" not in source
+    assert "load_tuning_profiles(self.get_project_dir())" in service_source
+    assert "def _load_state_file(" not in root_source
+    assert "def _save_state_file(" not in root_source
