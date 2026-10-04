@@ -1,9 +1,9 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "2.0.0",
   "source": {
     "repository": "oaslananka/kicad-mcp-pro",
     "version": "3.37.0",
-    "reviewed_source_sha": "e460e28a4dd0f2c105a1d2db3e26eb731769c543"
+    "reviewed_source_sha": "66c0cd2750b8d79d717ece5299ec8da995f775cd"
   },
   "tools": [
     {
@@ -24,6 +24,7 @@
           "required": false
         }
       ],
+      "argument_shapes": [],
       "destructive": false,
       "idempotent": true,
       "supports_dry_run": false,
@@ -55,6 +56,7 @@
         "create"
       ],
       "path_arguments": [],
+      "argument_shapes": [],
       "destructive": true,
       "idempotent": false,
       "supports_dry_run": false,
@@ -97,6 +99,12 @@
           "base_argument": "path"
         }
       ],
+      "argument_shapes": [
+        {
+          "argument": "confirm_overwrite",
+          "value_kind": "boolean"
+        }
+      ],
       "destructive": true,
       "idempotent": false,
       "supports_dry_run": false,
@@ -120,6 +128,14 @@
         "delete"
       ],
       "path_arguments": [],
+      "argument_shapes": [
+        {
+          "argument": "item_ids",
+          "value_kind": "collection",
+          "item_kind": "string",
+          "breadth_dimension": "item_count"
+        }
+      ],
       "destructive": true,
       "idempotent": false,
       "supports_dry_run": true,
@@ -145,6 +161,7 @@
         "create"
       ],
       "path_arguments": [],
+      "argument_shapes": [],
       "destructive": true,
       "idempotent": false,
       "supports_dry_run": false,
@@ -179,6 +196,7 @@
           "default": "gerber"
         }
       ],
+      "argument_shapes": [],
       "destructive": true,
       "idempotent": true,
       "supports_dry_run": false,
