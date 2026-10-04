@@ -100,9 +100,7 @@ def test_generate_preserves_empty_intent_failure() -> None:
 
 
 def test_generate_preserves_conflict_only_success_semantics() -> None:
-    intent = _intent(
-        power_rails=[SimpleNamespace(name="+5V", voltage_v=5.0, current_max_a=1.0)]
-    )
+    intent = _intent(power_rails=[SimpleNamespace(name="+5V", voltage_v=5.0, current_max_a=1.0)])
 
     def fail(_name: str, _body: str) -> Path:
         raise ValueError("write failed")
