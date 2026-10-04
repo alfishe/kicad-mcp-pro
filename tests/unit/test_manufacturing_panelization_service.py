@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import subprocess
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -93,6 +92,40 @@ def test_grid_dry_run_preserves_command_and_output_contract(tmp_path: Path) -> N
     assert "Set dry_run=false and confirm=true" in result
 
 
+
+def test_panelization_preserves_write_safety_gates(tmp_path: Path) -> None:
+    service, calls, _pcb = _service(tmp_path)
+
+    confirmation = service.panelize(dry_run=False, confirm=False)
+    assert "Panelization requires explicit confirmation" in confirmation
+    assert calls == []
+
+    panel_file = tmp_path / "panel" / "demo_panel_2x2.kicad_pcb"
+    panel_file.parent.mkdir(parents=True, exist_ok=True)
+    panel_file.write_text("(kicad_pcb)", encoding="utf-8")
+
+    overwrite = service.panelize(dry_run=False, confirm=True)
+    assert "Refusing to overwrite an existing panel file" in overwrite
+    assert calls == []
+
+
+def test_panelization_preserves_os_execution_failure(tmp_path: Path) -> None:
+    module = _service_module()
+    pcb = tmp_path / "demo.kicad_pcb"
+    pcb.write_text("(kicad_pcb)", encoding="utf-8")
+
+    def fail(_cmd: list[str]):  # type: ignore[no-untyped-def]
+        raise OSError("runner unavailable")
+
+    service = module.PanelizationService(
+        kikit_available=lambda: True,
+        get_pcb_file=lambda: pcb,
+        ensure_output_dir=lambda name: tmp_path / name,
+        resolve_output_path=lambda path_text: tmp_path / path_text,
+        run_command=fail,
+    )
+    assert service.panelize(dry_run=False, confirm=True) == "Failed to run KiKit: runner unavailable"
+
 def test_panelization_executes_variants_and_preserves_failures(tmp_path: Path) -> None:
     service, calls, _pcb = _service(tmp_path)
 
@@ -121,7 +154,7 @@ def test_panelization_executes_variants_and_preserves_failures(tmp_path: Path) -
     )
 
     def timeout(_cmd: list[str]):  # type: ignore[no-untyped-def]
-        raise subprocess.TimeoutExpired(cmd="kikit", timeout=120)
+        raise module.PanelizationTimeoutError
 
     timed = module.PanelizationService(
         kikit_available=lambda: True,

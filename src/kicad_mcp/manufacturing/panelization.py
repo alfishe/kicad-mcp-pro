@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+
+class PanelizationTimeoutError(TimeoutError):
+    """Raised when KiKit panelization exceeds the runner timeout."""
 
 
 class PanelizationProcessResult(Protocol):
@@ -102,9 +105,9 @@ class PanelizationService:
 
         try:
             result = self.run_command(cmd)
-        except subprocess.TimeoutExpired:
+        except PanelizationTimeoutError:
             return "KiKit panelization timed out after 120 seconds."
-        except (OSError, FileNotFoundError) as exc:
+        except OSError as exc:
             return f"Failed to run KiKit: {exc}"
 
         if result.returncode != 0:

@@ -5,19 +5,39 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 -- validated argv-only KiKit execution.
 from dataclasses import dataclass
 
 from mcp.server.mcpserver import MCPServer as FastMCP
 
 from ..config import get_config
-from ..manufacturing.panelization import PanelizationService
+from ..manufacturing.panelization import PanelizationService, PanelizationTimeoutError
 from .metadata import headless_compatible
 
 
 @dataclass(frozen=True)
 class ManufacturingPanelizationDependencies:
     service: PanelizationService
+
+
+def _run_kikit(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    if len(cmd) < 2 or cmd[:2] != ["kikit", "panelize"]:
+        raise ValueError("Panelization runner accepts only the KiKit panelize command.")
+    if any(not isinstance(arg, str) or "\x00" in arg for arg in cmd):
+        raise ValueError("Panelization command arguments must be valid strings.")
+
+    try:
+        return subprocess.run(  # nosec B603  # nosemgrep
+            cmd,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=120,
+            shell=False,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise PanelizationTimeoutError from exc
 
 
 def _default_dependencies() -> ManufacturingPanelizationDependencies:
@@ -27,13 +47,7 @@ def _default_dependencies() -> ManufacturingPanelizationDependencies:
             get_pcb_file=lambda: get_config().pcb_file,
             ensure_output_dir=lambda name: get_config().ensure_output_dir(name),
             resolve_output_path=lambda path: get_config().resolve_within_project(path),
-            run_command=lambda cmd: subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=120,
-            ),
+            run_command=_run_kikit,
         )
     )
 
