@@ -44,8 +44,7 @@ def test_create_list_and_apply_preserve_state_file_contract(tmp_path: Path) -> N
         }
     }
     assert applied == (
-        "Tuning profile 'fast' assigned to 'DATA*'.\n"
-        f"Assignments file: {assignments_path}"
+        f"Tuning profile 'fast' assigned to 'DATA*'.\nAssignments file: {assignments_path}"
     )
     profiles_payload = json.loads(profiles_path.read_text(encoding="utf-8"))
     assert profiles_payload["profiles"]["fast"]["layer"] == "F.Cu"

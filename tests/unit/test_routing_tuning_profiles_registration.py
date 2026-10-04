@@ -27,9 +27,7 @@ class FakeService:
         trace_impedance_ohm: float,
         propagation_speed_factor: float,
     ) -> str:
-        self.calls.append(
-            ("create", name, layer, trace_impedance_ohm, propagation_speed_factor)
-        )
+        self.calls.append(("create", name, layer, trace_impedance_ohm, propagation_speed_factor))
         return "created-profile"
 
     def list_profiles(self) -> str:
@@ -70,9 +68,7 @@ def test_registration_preserves_order_signatures_metadata_and_delegation() -> No
     assert "Create or update a KiCad 10-style time-domain tuning profile" in (
         create.fn.__doc__ or ""
     )
-    assert "List configured time-domain tuning profiles" in (
-        list_profiles.fn.__doc__ or ""
-    )
+    assert "List configured time-domain tuning profiles" in (list_profiles.fn.__doc__ or "")
     assert "Assign a named tuning profile" in (apply.fn.__doc__ or "")
 
     for tool_name in (

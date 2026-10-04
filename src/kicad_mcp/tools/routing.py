@@ -40,6 +40,7 @@ __all__ = [
     "_write_rule",
 ]
 
+
 def _find_pad(reference: str, pad_number: str) -> _PadLike | None:
     for pad in cast(list[_PadLike], board_pads(get_board())):
         if pad.parent.reference_field.text.value == reference and str(pad.number) == str(
