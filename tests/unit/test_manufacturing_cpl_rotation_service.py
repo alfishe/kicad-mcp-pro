@@ -117,6 +117,8 @@ def test_custom_output_and_validation_errors_are_preserved(
         dry_run=True,
     )
     assert f"Output would be: {(tmp_path / 'release' / 'cpl.csv').resolve()}" in custom
+
+
 def test_rotation_table_failures_and_non_numeric_rotation_are_preserved(
     service: ManufacturingCplRotationService,
     tmp_path: Path,
