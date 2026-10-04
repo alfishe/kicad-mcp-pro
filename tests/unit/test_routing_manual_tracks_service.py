@@ -1,48 +1,52 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import cast
 
 from kipy.board_types import Net
 from kipy.geometry import Vector2
 
+from kicad_mcp.models.common import _PadLike
 from kicad_mcp.pcb.geometry import point_xy_mm
-from kicad_mcp.routing.manual_tracks import RoutingManualTrackService
+from kicad_mcp.routing.manual_tracks import MutationCommand, RoutingManualTrackService
 from kicad_mcp.utils.layers import resolve_layer
 from kicad_mcp.utils.units import mm_to_nm
 
 
 class FakeBoard:
     def __init__(self) -> None:
-        self.created: list[Any] = []
+        self.created: list[object] = []
 
-    def create_items(self, items: list[Any]) -> list[Any]:
+    def create_items(self, items: list[object]) -> list[object]:
         self.created.extend(items)
         return items
 
 
-def _pad(reference: str, number: str, x_mm: float, y_mm: float, net_name: str) -> Any:
+def _pad(reference: str, number: str, x_mm: float, y_mm: float, net_name: str) -> _PadLike:
     net = Net()
     net.name = net_name
-    return SimpleNamespace(
-        parent=SimpleNamespace(
-            reference_field=SimpleNamespace(
-                text=SimpleNamespace(value=reference),
-            )
+    return cast(
+        _PadLike,
+        SimpleNamespace(
+            parent=SimpleNamespace(
+                reference_field=SimpleNamespace(
+                    text=SimpleNamespace(value=reference),
+                )
+            ),
+            number=number,
+            position=Vector2.from_xy_mm(x_mm, y_mm),
+            net=net,
         ),
-        number=number,
-        position=Vector2.from_xy_mm(x_mm, y_mm),
-        net=net,
     )
 
 
 def _service(
-    pads: list[Any] | None = None,
+    pads: list[_PadLike] | None = None,
 ) -> tuple[RoutingManualTrackService, FakeBoard, list[str]]:
     board = FakeBoard()
     operations: list[str] = []
 
-    def execute(operation: str, command: Any) -> Any:
+    def execute(operation: str, command: MutationCommand) -> object:
         operations.append(operation)
         return command(board)
 
