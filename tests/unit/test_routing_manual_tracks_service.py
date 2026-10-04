@@ -97,8 +97,7 @@ def test_route_pad_to_pad_preserves_orthogonal_geometry_and_response() -> None:
     result = service.route_pad_to_pad("R1", "1", "U2", "3", "F_Cu", 0.25)
 
     assert result == (
-        "Created an orthogonal two-segment route from R1:1 to U2:3. "
-        "Run DRC to verify the path."
+        "Created an orthogonal two-segment route from R1:1 to U2:3. Run DRC to verify the path."
     )
     assert operations == ["route_from_pad_to_pad"]
     assert len(board.created) == 2
