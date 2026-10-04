@@ -78,7 +78,7 @@ class RoutingSesApplyService:
         except (ValueError, OSError) as exc:
             return ToolResult.failure("route_apply_ses", f"Could not apply the SES: {exc}")
 
-        if route is None:
+        if route is None:  # pragma: no cover - set by the mutator on every success path
             return ToolResult.failure("route_apply_ses", "Routing produced no result to apply.")
 
         return ToolResult.success(
