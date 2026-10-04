@@ -92,7 +92,6 @@ def test_grid_dry_run_preserves_command_and_output_contract(tmp_path: Path) -> N
     assert "Set dry_run=false and confirm=true" in result
 
 
-
 def test_panelization_preserves_write_safety_gates(tmp_path: Path) -> None:
     service, calls, _pcb = _service(tmp_path)
 
