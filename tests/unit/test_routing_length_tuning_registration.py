@@ -10,10 +10,18 @@ from mcp.server.mcpserver import MCPServer as FastMCP
 from kicad_mcp.tools.metadata import get_tool_metadata
 
 
-def _adapter(name: str) -> ModuleType:
-    spec = importlib.util.find_spec(name)
+def _single_adapter() -> ModuleType:
+    module_name = "kicad_mcp.tools.routing_length_tuning"
+    spec = importlib.util.find_spec(module_name)
     assert spec is not None
-    return importlib.import_module(name)
+    return importlib.import_module(module_name)
+
+
+def _pair_adapter() -> ModuleType:
+    module_name = "kicad_mcp.tools.routing_diff_pair_length"
+    spec = importlib.util.find_spec(module_name)
+    assert spec is not None
+    return importlib.import_module(module_name)
 
 
 class FakeService:
@@ -41,7 +49,7 @@ class FakeService:
 
 
 def test_single_registration_preserves_signature_metadata_and_delegation() -> None:
-    adapter = _adapter("kicad_mcp.tools.routing_length_tuning")
+    adapter = _single_adapter()
     server = FastMCP("routing-length-tuning-registration")
     service = FakeService()
     adapter.register(server, adapter.RoutingLengthTuningDependencies(service=service))
@@ -64,7 +72,7 @@ def test_single_registration_preserves_signature_metadata_and_delegation() -> No
 
 
 def test_pair_registration_preserves_signature_metadata_and_delegation() -> None:
-    adapter = _adapter("kicad_mcp.tools.routing_diff_pair_length")
+    adapter = _pair_adapter()
     server = FastMCP("routing-diff-pair-length-registration")
     service = FakeService()
     adapter.register(server, adapter.RoutingDiffPairLengthDependencies(service=service))
