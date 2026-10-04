@@ -47,6 +47,7 @@ _MANUFACTURING_TEST_PLAN_ADAPTER = "kicad_mcp.tools.manufacturing_test_plan"
 _ROUTING_ROOT_MODULE = "kicad_mcp.tools.routing"
 _ROUTING_TUNING_PROFILES_ADAPTER = "kicad_mcp.tools.routing_tuning_profiles"
 _ROUTING_SPECCTRA_STAGING_ADAPTER = "kicad_mcp.tools.routing_specctra_staging"
+_ROUTING_NET_CLASS_RULES_ADAPTER = "kicad_mcp.tools.routing_net_class_rules"
 
 DOMAIN_MODULES = {
     "kicad_mcp.ir.engineering_graph": SRC_ROOT / "kicad_mcp" / "ir" / "engineering_graph.py",
@@ -195,6 +196,10 @@ DOMAIN_MODULES = {
     / "kicad_mcp"
     / "routing"
     / "specctra_staging.py",
+    "kicad_mcp.routing.net_class_rules": SRC_ROOT
+    / "kicad_mcp"
+    / "routing"
+    / "net_class_rules.py",
     _ROUTING_TUNING_PROFILES_ADAPTER: SRC_ROOT
     / "kicad_mcp"
     / "tools"
@@ -203,6 +208,10 @@ DOMAIN_MODULES = {
     / "kicad_mcp"
     / "tools"
     / "routing_specctra_staging.py",
+    _ROUTING_NET_CLASS_RULES_ADAPTER: SRC_ROOT
+    / "kicad_mcp"
+    / "tools"
+    / "routing_net_class_rules.py",
     _PROJECT_CONTEXT_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_context.py",
     _PROJECT_CREATION_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_creation.py",
     _PROJECT_DESIGN_SPEC_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_design_spec.py",
@@ -429,6 +438,7 @@ DOMAIN_MODULES = {
 PURE_HELPERS = {
     "kicad_mcp.routing.tuning_profiles",
     "kicad_mcp.routing.specctra_staging",
+    "kicad_mcp.routing.net_class_rules",
     "kicad_mcp.manufacturing.cpl_rotation",
     "kicad_mcp.manufacturing.panelization",
     "kicad_mcp.manufacturing.imports",
@@ -522,6 +532,7 @@ FORBIDDEN_PURE_IMPORT_PREFIXES = (
 ADAPTER_FORBIDDEN_IMPORT_PREFIXES = {
     _ROUTING_TUNING_PROFILES_ADAPTER: (_ROUTING_ROOT_MODULE,),
     _ROUTING_SPECCTRA_STAGING_ADAPTER: (_ROUTING_ROOT_MODULE,),
+    _ROUTING_NET_CLASS_RULES_ADAPTER: (_ROUTING_ROOT_MODULE,),
     _MANUFACTURING_RELEASE_EVIDENCE_ADAPTER: (_MANUFACTURING_ROOT_MODULE,),
     _MANUFACTURING_RELEASE_MANIFEST_ADAPTER: (_MANUFACTURING_ROOT_MODULE,),
     _MANUFACTURING_TEST_PLAN_ADAPTER: (_MANUFACTURING_ROOT_MODULE,),
@@ -617,9 +628,10 @@ REGISTER_LINE_LIMITS = {
     _MANUFACTURING_RELEASE_EVIDENCE_ADAPTER: 90,
     _MANUFACTURING_RELEASE_MANIFEST_ADAPTER: 75,
     _MANUFACTURING_TEST_PLAN_ADAPTER: 80,
-    _ROUTING_ROOT_MODULE: 800,
+    _ROUTING_ROOT_MODULE: 770,
     _ROUTING_TUNING_PROFILES_ADAPTER: 95,
     _ROUTING_SPECCTRA_STAGING_ADAPTER: 80,
+    _ROUTING_NET_CLASS_RULES_ADAPTER: 75,
     _PROJECT_CONTEXT_ADAPTER: 55,
     _PROJECT_CREATION_ADAPTER: 55,
     _PROJECT_DESIGN_SPEC_ADAPTER: 120,

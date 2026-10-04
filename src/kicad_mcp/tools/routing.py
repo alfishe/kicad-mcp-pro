@@ -91,40 +91,6 @@ def _infer_diff_pair_base(net_p: str, net_n: str) -> str | None:
     return None
 
 
-def _net_class_rule_body(
-    net_class: str,
-    width_mm: float,
-    clearance_mm: float,
-    via_diameter_mm: float,
-    via_drill_mm: float,
-) -> tuple[str, str]:
-    track_width_constraint = (
-        f"  (constraint track_width (min {_mm(width_mm)}) "
-        f"(opt {_mm(width_mm)}) (max {_mm(width_mm)}))"
-    )
-    via_diameter_constraint = (
-        f"  (constraint via_diameter (min {_mm(via_diameter_mm)}) "
-        f"(opt {_mm(via_diameter_mm)}) (max {_mm(via_diameter_mm)}))"
-    )
-    via_drill_constraint = (
-        f"  (constraint via_drill (min {_mm(via_drill_mm)}) "
-        f"(opt {_mm(via_drill_mm)}) (max {_mm(via_drill_mm)}))"
-    )
-    name = f"Net class {net_class}"
-    body = "\n".join(
-        [
-            f"(rule {_sexpr_string(name)}",
-            f"  (condition \"A.NetClass == '{net_class}'\")",
-            track_width_constraint,
-            f"  (constraint clearance (min {_mm(clearance_mm)}))",
-            via_diameter_constraint,
-            via_drill_constraint,
-            ")",
-        ]
-    )
-    return name, body
-
-
 def _diff_pair_rule_body(
     net_p: str,
     net_n: str,
@@ -626,32 +592,12 @@ def register(mcp: FastMCP) -> None:
 
         return await _run()
 
-    @mcp.tool()
-    @headless_compatible
-    def route_set_net_class_rules(
-        net_class: str,
-        width_mm: float,
-        clearance_mm: float,
-        via_diameter_mm: float,
-        via_drill_mm: float,
-    ) -> str:
-        """Write net-class routing constraints into the active .kicad_dru file."""
-        rule_name, rule_body = _net_class_rule_body(
-            net_class,
-            width_mm,
-            clearance_mm,
-            via_diameter_mm,
-            via_drill_mm,
-        )
-        try:
-            path = _write_rule(rule_name, rule_body)
-        except (OSError, ValueError) as exc:
-            return f"Net-class rule update failed: {exc}"
-        return (
-            f"Net-class routing rule '{rule_name}' written to {path}.\n"
-            f"Track width: {_mm(width_mm)}, clearance: {_mm(clearance_mm)}, "
-            f"via: {_mm(via_diameter_mm)} / drill {_mm(via_drill_mm)}."
-        )
+    from . import routing_net_class_rules
+
+    routing_net_class_rules.register(
+        mcp,
+        routing_net_class_rules.dependencies(_write_rule),
+    )
 
     @mcp.tool()
     @headless_compatible
