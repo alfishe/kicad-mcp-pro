@@ -188,18 +188,12 @@ DOMAIN_MODULES = {
     / "tools"
     / "manufacturing_test_plan.py",
     _ROUTING_ROOT_MODULE: SRC_ROOT / "kicad_mcp" / "tools" / "routing.py",
-    "kicad_mcp.routing.tuning_profiles": SRC_ROOT
-    / "kicad_mcp"
-    / "routing"
-    / "tuning_profiles.py",
+    "kicad_mcp.routing.tuning_profiles": SRC_ROOT / "kicad_mcp" / "routing" / "tuning_profiles.py",
     "kicad_mcp.routing.specctra_staging": SRC_ROOT
     / "kicad_mcp"
     / "routing"
     / "specctra_staging.py",
-    "kicad_mcp.routing.net_class_rules": SRC_ROOT
-    / "kicad_mcp"
-    / "routing"
-    / "net_class_rules.py",
+    "kicad_mcp.routing.net_class_rules": SRC_ROOT / "kicad_mcp" / "routing" / "net_class_rules.py",
     _ROUTING_TUNING_PROFILES_ADAPTER: SRC_ROOT
     / "kicad_mcp"
     / "tools"
