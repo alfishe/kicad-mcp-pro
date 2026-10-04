@@ -10,13 +10,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "2.0.0"
 SOURCE_REPOSITORY = "oaslananka/kicad-mcp-pro"
-REVIEWED_SOURCE_SHA = "e460e28a4dd0f2c105a1d2db3e26eb731769c543"
+REVIEWED_SOURCE_SHA = "66c0cd2750b8d79d717ece5299ec8da995f775cd"
 
 type OperationEffect = Literal["read", "write", "create", "delete"]
 type TransactionSupport = Literal["none", "internal_guarded", "external_lifecycle", "unknown"]
 type VerificationRequirement = Literal["source_review", "input_schema_match"]
+type ArgumentValueKind = Literal["string", "boolean", "number", "object", "collection", "unknown"]
+type CollectionItemKind = Literal["string", "boolean", "number", "object", "unknown"]
+type BreadthDimension = Literal["item_count", "path_count"]
+
 
 
 @dataclass(frozen=True)
@@ -29,11 +33,20 @@ class PathArgumentEffect:
 
 
 @dataclass(frozen=True)
+class ArgumentShapeFact:
+    argument: str
+    value_kind: ArgumentValueKind
+    item_kind: CollectionItemKind | None = None
+    breadth_dimension: BreadthDimension | None = None
+
+
+@dataclass(frozen=True)
 class ReviewedToolEffect:
     name: str
     arguments: tuple[str, ...]
     effects: tuple[OperationEffect, ...]
     path_arguments: tuple[PathArgumentEffect, ...]
+    argument_shapes: tuple[ArgumentShapeFact, ...]
     destructive: bool
     idempotent: bool
     supports_dry_run: bool
@@ -55,6 +68,7 @@ REVIEWED_TOOL_EFFECTS: tuple[ReviewedToolEffect, ...] = (
                 required=False,
             ),
         ),
+        argument_shapes=(),
         destructive=False,
         idempotent=True,
         supports_dry_run=False,
@@ -77,6 +91,7 @@ REVIEWED_TOOL_EFFECTS: tuple[ReviewedToolEffect, ...] = (
         ),
         effects=("read", "write", "create"),
         path_arguments=(),
+        argument_shapes=(),
         destructive=True,
         idempotent=False,
         supports_dry_run=False,
@@ -102,6 +117,9 @@ REVIEWED_TOOL_EFFECTS: tuple[ReviewedToolEffect, ...] = (
                 base_argument="path",
             ),
         ),
+        argument_shapes=(
+            ArgumentShapeFact(argument="confirm_overwrite", value_kind="boolean"),
+        ),
         destructive=True,
         idempotent=False,
         supports_dry_run=False,
@@ -115,6 +133,14 @@ REVIEWED_TOOL_EFFECTS: tuple[ReviewedToolEffect, ...] = (
         arguments=("item_ids",),
         effects=("read", "delete"),
         path_arguments=(),
+        argument_shapes=(
+            ArgumentShapeFact(
+                argument="item_ids",
+                value_kind="collection",
+                item_kind="string",
+                breadth_dimension="item_count",
+            ),
+        ),
         destructive=True,
         idempotent=False,
         supports_dry_run=True,
@@ -128,6 +154,7 @@ REVIEWED_TOOL_EFFECTS: tuple[ReviewedToolEffect, ...] = (
         arguments=("name", "pins"),
         effects=("read", "write", "create"),
         path_arguments=(),
+        argument_shapes=(),
         destructive=True,
         idempotent=False,
         supports_dry_run=False,
@@ -148,6 +175,7 @@ REVIEWED_TOOL_EFFECTS: tuple[ReviewedToolEffect, ...] = (
                 default="gerber",
             ),
         ),
+        argument_shapes=(),
         destructive=True,
         idempotent=True,
         supports_dry_run=False,
