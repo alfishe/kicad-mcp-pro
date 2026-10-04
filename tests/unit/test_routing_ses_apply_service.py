@@ -89,9 +89,7 @@ def test_apply_preserves_empty_route_failure(tmp_path: Path) -> None:
 
     assert result.ok is False
     relative_ses = str(Path("output") / "routing" / "board.ses")
-    assert result.errors == [
-        f"The session at {relative_ses} contained no routed segments or vias."
-    ]
+    assert result.errors == [f"The session at {relative_ses} contained no routed segments or vias."]
 
 
 def test_apply_preserves_idempotent_success(tmp_path: Path) -> None:
