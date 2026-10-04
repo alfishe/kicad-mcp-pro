@@ -5,7 +5,11 @@
   "description": "Versioned source-reviewed argument and effect facts for external fail-closed policy consumers.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "source", "tools"],
+  "required": [
+    "schemaVersion",
+    "source",
+    "tools"
+  ],
   "properties": {
     "schemaVersion": {
       "$ref": "#/$defs/semver"
@@ -13,7 +17,11 @@
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "version", "reviewed_source_sha"],
+      "required": [
+        "repository",
+        "version",
+        "reviewed_source_sha"
+      ],
       "properties": {
         "repository": {
           "const": "oaslananka/kicad-mcp-pro"
@@ -41,12 +49,21 @@
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
     },
     "effect": {
-      "enum": ["read", "write", "create", "delete"]
+      "enum": [
+        "read",
+        "write",
+        "create",
+        "delete"
+      ]
     },
     "pathArgument": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["argument", "effects", "required"],
+      "required": [
+        "argument",
+        "effects",
+        "required"
+      ],
       "properties": {
         "argument": {
           "type": "string",
@@ -80,6 +97,7 @@
         "arguments",
         "effects",
         "path_arguments",
+        "argument_shapes",
         "destructive",
         "idempotent",
         "supports_dry_run",
@@ -127,12 +145,20 @@
           "type": "boolean"
         },
         "transaction_support": {
-          "enum": ["none", "internal_guarded", "external_lifecycle", "unknown"]
+          "enum": [
+            "none",
+            "internal_guarded",
+            "external_lifecycle",
+            "unknown"
+          ]
         },
         "verification_requirements": {
           "type": "array",
           "items": {
-            "enum": ["source_review", "input_schema_match"]
+            "enum": [
+              "source_review",
+              "input_schema_match"
+            ]
           },
           "minItems": 1,
           "uniqueItems": true
@@ -144,6 +170,13 @@
             "minLength": 1
           },
           "minItems": 1,
+          "uniqueItems": true
+        },
+        "argument_shapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/argumentShape"
+          },
           "uniqueItems": true
         }
       },
@@ -163,11 +196,85 @@
           }
         }
       ]
+    },
+    "argumentShape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "argument",
+        "value_kind"
+      ],
+      "properties": {
+        "argument": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "value_kind": {
+          "enum": [
+            "string",
+            "boolean",
+            "number",
+            "object",
+            "collection",
+            "unknown"
+          ]
+        },
+        "item_kind": {
+          "enum": [
+            "string",
+            "boolean",
+            "number",
+            "object",
+            "unknown"
+          ]
+        },
+        "breadth_dimension": {
+          "enum": [
+            "item_count",
+            "path_count"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "value_kind": {
+                "const": "collection"
+              }
+            },
+            "required": [
+              "value_kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "item_kind"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "item_kind"
+                  ]
+                },
+                {
+                  "required": [
+                    "breadth_dimension"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   },
   "x-kicad-studio-kit": {
     "trackingIssue": "OASLANA-52",
-    "schemaVersion": "1.0.0"
+    "schemaVersion": "2.0.0"
   },
   "x-kicad-mcp": {
     "trackingIssue": "OASLANA-52",
