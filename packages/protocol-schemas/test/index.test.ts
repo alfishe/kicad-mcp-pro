@@ -107,7 +107,8 @@ test("rejects v1 tool-effect manifests after the v2 argument-shape contract", ()
   assert.equal(invalid.valid, false);
   assert.ok(
     invalid.errors.some(
-      (error) => error.keyword === "schemaMajor" && error.path === "/schemaVersion",
+      (error) =>
+        error.keyword === "schemaMajor" && error.path === "/schemaVersion",
     ),
   );
 });
