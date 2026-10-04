@@ -201,10 +201,7 @@ DOMAIN_MODULES = {
     / "kicad_mcp"
     / "routing"
     / "differential_pair_rules.py",
-    "kicad_mcp.routing.length_tuning": SRC_ROOT
-    / "kicad_mcp"
-    / "routing"
-    / "length_tuning.py",
+    "kicad_mcp.routing.length_tuning": SRC_ROOT / "kicad_mcp" / "routing" / "length_tuning.py",
     _ROUTING_TUNING_PROFILES_ADAPTER: SRC_ROOT
     / "kicad_mcp"
     / "tools"
@@ -221,10 +218,7 @@ DOMAIN_MODULES = {
     / "kicad_mcp"
     / "tools"
     / "routing_differential_pair.py",
-    _ROUTING_LENGTH_TUNING_ADAPTER: SRC_ROOT
-    / "kicad_mcp"
-    / "tools"
-    / "routing_length_tuning.py",
+    _ROUTING_LENGTH_TUNING_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "routing_length_tuning.py",
     _ROUTING_DIFF_PAIR_LENGTH_ADAPTER: SRC_ROOT
     / "kicad_mcp"
     / "tools"
