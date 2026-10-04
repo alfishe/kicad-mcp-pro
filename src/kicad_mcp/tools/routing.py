@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any, cast
@@ -21,6 +20,7 @@ from ..models.tool_result import ArtifactRef, StateDelta, ToolResult
 from ..pcb.board_access import board_nets_filtered, board_pads, board_tracks
 from ..pcb.geometry import point_xy_mm, track_segment_length_mm
 from ..pcb.live_edit_runtime import execute_live_board_mutation
+from ..routing.tuning_profiles import load_tuning_profiles
 from ..utils.freerouting import FreeRoutingRunner
 from ..utils.layers import resolve_layer
 from ..utils.router_core import apply_ses_to_pcb
@@ -39,10 +39,6 @@ __all__ = [
     "_upsert_rule",
     "_write_rule",
 ]
-_STATE_DIRNAME = ".kicad-mcp"
-_TUNING_PROFILES_FILENAME = "tuning_profiles.json"
-_TUNING_ASSIGNMENTS_FILENAME = "tuning_profile_assignments.json"
-
 
 def _find_pad(reference: str, pad_number: str) -> _PadLike | None:
     for pad in cast(list[_PadLike], board_pads(get_board())):
@@ -203,31 +199,6 @@ def _relative_project_path(path: Path) -> str:
         return str(path.resolve().relative_to(cfg.project_root))
     except ValueError:
         return str(path.resolve())
-
-
-def _routing_state_dir() -> Path:
-    cfg = get_config()
-    if cfg.project_dir is None:
-        raise ValueError(
-            "No active project directory is configured. Call kicad_set_project() first."
-        )
-    target = cfg.project_dir / _STATE_DIRNAME
-    target.mkdir(parents=True, exist_ok=True)
-    return target
-
-
-def _load_state_file(filename: str, default: dict[str, object]) -> dict[str, object]:
-    path = _routing_state_dir() / filename
-    if not path.exists():
-        path.write_text(json.dumps(default, indent=2), encoding="utf-8")
-        return dict(default)
-    return cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
-
-
-def _save_state_file(filename: str, payload: dict[str, object]) -> Path:
-    path = _routing_state_dir() / filename
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return path
 
 
 def _net_pattern_condition(net_pattern: str) -> str:
@@ -815,57 +786,9 @@ def register(mcp: FastMCP) -> None:
             f"Suggested meander amplitude: {meander_amplitude_mm:.3f} mm"
         )
 
-    @mcp.tool()
-    @headless_compatible
-    def route_create_tuning_profile(
-        name: str,
-        layer: str,
-        trace_impedance_ohm: float,
-        propagation_speed_factor: float,
-    ) -> str:
-        """Create or update a KiCad 10-style time-domain tuning profile."""
-        if not 0.05 <= propagation_speed_factor <= 1.0:
-            raise ValueError("propagation_speed_factor must be between 0.05 and 1.0.")
-        resolved_layer = resolve_layer(layer)
-        _ = resolved_layer
-        state = _load_state_file(_TUNING_PROFILES_FILENAME, {"profiles": {}})
-        profiles = cast(dict[str, object], state.setdefault("profiles", {}))
-        profiles[name] = {
-            "layer": layer,
-            "trace_impedance_ohm": trace_impedance_ohm,
-            "propagation_speed_factor": propagation_speed_factor,
-        }
-        path = _save_state_file(_TUNING_PROFILES_FILENAME, state)
-        return f"Tuning profile '{name}' saved to {path}."
+    from . import routing_tuning_profiles
 
-    @mcp.tool()
-    @headless_compatible
-    def route_list_tuning_profiles() -> str:
-        """List configured time-domain tuning profiles."""
-        state = _load_state_file(_TUNING_PROFILES_FILENAME, {"profiles": {}})
-        return json.dumps(state.get("profiles", {}), indent=2)
-
-    @mcp.tool()
-    @headless_compatible
-    def route_apply_tuning_profile(net_pattern: str, profile_name: str) -> str:
-        """Assign a named tuning profile to a net or wildcard net group."""
-        profiles_state = _load_state_file(_TUNING_PROFILES_FILENAME, {"profiles": {}})
-        profiles = cast(dict[str, dict[str, object]], profiles_state.get("profiles", {}))
-        profile = profiles.get(profile_name)
-        if profile is None:
-            return f"Tuning profile '{profile_name}' was not found."
-
-        assignments_state = _load_state_file(_TUNING_ASSIGNMENTS_FILENAME, {"assignments": {}})
-        assignments = cast(dict[str, object], assignments_state.setdefault("assignments", {}))
-        assignments[net_pattern] = {
-            "profile_name": profile_name,
-            "layer": profile.get("layer", ""),
-        }
-        path = _save_state_file(_TUNING_ASSIGNMENTS_FILENAME, assignments_state)
-        return (
-            f"Tuning profile '{profile_name}' assigned to '{net_pattern}'.\n"
-            f"Assignments file: {path}"
-        )
+    routing_tuning_profiles.register(mcp)
 
     @mcp.tool()
     @headless_compatible
@@ -876,8 +799,7 @@ def register(mcp: FastMCP) -> None:
         layer: str | None = None,
     ) -> str:
         """Create a KiCad 10-inspired time-domain tuning rule with a length fallback."""
-        profiles_state = _load_state_file(_TUNING_PROFILES_FILENAME, {"profiles": {}})
-        profiles = cast(dict[str, dict[str, object]], profiles_state.get("profiles", {}))
+        profiles = load_tuning_profiles(get_config().project_dir)
         propagation_speed_factor = 0.5
         profile_impedance_ohm = 50.0
         effective_er: float | None = None
