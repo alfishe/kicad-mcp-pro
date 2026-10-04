@@ -31,6 +31,9 @@ def test_registration_preserves_signature_metadata_and_delegation() -> None:
     assert str(inspect.signature(tool.fn)) == (
         "(ses_path: 'str' = 'output/routing/board.ses') -> 'ToolResult'"
     )
+    assert "Apply a routed Specctra SES to the active board headlessly -- no GUI step." in (
+        tool.fn.__doc__ or ""
+    )
     metadata = get_tool_metadata("route_apply_ses")
     assert metadata is not None
     assert metadata.headless_compatible is True
