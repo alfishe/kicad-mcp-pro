@@ -48,7 +48,7 @@ def test_routing_root_preserves_manual_track_registration_order() -> None:
 
     manual = source.index("routing_manual_tracks.register(mcp)")
     specctra = source.index("routing_specctra_staging.register(mcp)")
-    apply_ses = source.index("def route_apply_ses(")
+    apply_ses = source.index("routing_ses_apply.register(mcp)")
     assert manual < specctra < apply_ses
 
 

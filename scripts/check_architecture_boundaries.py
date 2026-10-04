@@ -54,6 +54,7 @@ _ROUTING_DIFF_PAIR_LENGTH_ADAPTER = "kicad_mcp.tools.routing_diff_pair_length"
 _ROUTING_BOARD_CONSTRAINTS_ADAPTER = "kicad_mcp.tools.routing_board_constraints"
 _ROUTING_TIME_DOMAIN_TUNING_ADAPTER = "kicad_mcp.tools.routing_time_domain_tuning"
 _ROUTING_MANUAL_TRACKS_ADAPTER = "kicad_mcp.tools.routing_manual_tracks"
+_ROUTING_SES_APPLY_ADAPTER = "kicad_mcp.tools.routing_ses_apply"
 
 DOMAIN_MODULES = {
     "kicad_mcp.ir.engineering_graph": SRC_ROOT / "kicad_mcp" / "ir" / "engineering_graph.py",
@@ -214,6 +215,7 @@ DOMAIN_MODULES = {
     / "routing"
     / "time_domain_tuning.py",
     "kicad_mcp.routing.manual_tracks": SRC_ROOT / "kicad_mcp" / "routing" / "manual_tracks.py",
+    "kicad_mcp.routing.ses_apply": SRC_ROOT / "kicad_mcp" / "routing" / "ses_apply.py",
     _ROUTING_TUNING_PROFILES_ADAPTER: SRC_ROOT
     / "kicad_mcp"
     / "tools"
@@ -244,6 +246,7 @@ DOMAIN_MODULES = {
     / "tools"
     / "routing_time_domain_tuning.py",
     _ROUTING_MANUAL_TRACKS_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "routing_manual_tracks.py",
+    _ROUTING_SES_APPLY_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "routing_ses_apply.py",
     _PROJECT_CONTEXT_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_context.py",
     _PROJECT_CREATION_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_creation.py",
     _PROJECT_DESIGN_SPEC_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_design_spec.py",
@@ -476,6 +479,7 @@ PURE_HELPERS = {
     "kicad_mcp.routing.board_constraints",
     "kicad_mcp.routing.time_domain_tuning",
     "kicad_mcp.routing.manual_tracks",
+    "kicad_mcp.routing.ses_apply",
     "kicad_mcp.manufacturing.cpl_rotation",
     "kicad_mcp.manufacturing.panelization",
     "kicad_mcp.manufacturing.imports",
@@ -576,6 +580,7 @@ ADAPTER_FORBIDDEN_IMPORT_PREFIXES = {
     _ROUTING_BOARD_CONSTRAINTS_ADAPTER: (_ROUTING_ROOT_MODULE,),
     _ROUTING_TIME_DOMAIN_TUNING_ADAPTER: (_ROUTING_ROOT_MODULE,),
     _ROUTING_MANUAL_TRACKS_ADAPTER: (_ROUTING_ROOT_MODULE,),
+    _ROUTING_SES_APPLY_ADAPTER: (_ROUTING_ROOT_MODULE,),
     _MANUFACTURING_RELEASE_EVIDENCE_ADAPTER: (_MANUFACTURING_ROOT_MODULE,),
     _MANUFACTURING_RELEASE_MANIFEST_ADAPTER: (_MANUFACTURING_ROOT_MODULE,),
     _MANUFACTURING_TEST_PLAN_ADAPTER: (_MANUFACTURING_ROOT_MODULE,),
@@ -671,7 +676,7 @@ REGISTER_LINE_LIMITS = {
     _MANUFACTURING_RELEASE_EVIDENCE_ADAPTER: 90,
     _MANUFACTURING_RELEASE_MANIFEST_ADAPTER: 75,
     _MANUFACTURING_TEST_PLAN_ADAPTER: 80,
-    _ROUTING_ROOT_MODULE: 390,
+    _ROUTING_ROOT_MODULE: 315,
     _ROUTING_TUNING_PROFILES_ADAPTER: 95,
     _ROUTING_SPECCTRA_STAGING_ADAPTER: 80,
     _ROUTING_NET_CLASS_RULES_ADAPTER: 75,
@@ -681,6 +686,7 @@ REGISTER_LINE_LIMITS = {
     _ROUTING_BOARD_CONSTRAINTS_ADAPTER: 65,
     _ROUTING_TIME_DOMAIN_TUNING_ADAPTER: 65,
     _ROUTING_MANUAL_TRACKS_ADAPTER: 120,
+    _ROUTING_SES_APPLY_ADAPTER: 75,
     _PROJECT_CONTEXT_ADAPTER: 55,
     _PROJECT_CREATION_ADAPTER: 55,
     _PROJECT_DESIGN_SPEC_ADAPTER: 120,
