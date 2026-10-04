@@ -20,6 +20,7 @@ from ..models.tool_result import ArtifactRef, StateDelta, ToolResult
 from ..pcb.board_access import board_nets_filtered, board_pads, board_tracks
 from ..pcb.geometry import point_xy_mm, track_segment_length_mm
 from ..pcb.live_edit_runtime import execute_live_board_mutation
+from ..routing.specctra_staging import relative_project_path
 from ..routing.tuning_profiles import load_tuning_profiles
 from ..utils.freerouting import FreeRoutingRunner
 from ..utils.layers import resolve_layer
@@ -195,11 +196,7 @@ def _diff_pair_length_rule_body(
 
 
 def _relative_project_path(path: Path) -> str:
-    cfg = get_config()
-    try:
-        return str(path.resolve().relative_to(cfg.project_root))
-    except ValueError:
-        return str(path.resolve())
+    return relative_project_path(path, get_config().project_root)
 
 
 def _net_pattern_condition(net_pattern: str) -> str:
@@ -328,71 +325,9 @@ def register(mcp: FastMCP) -> None:
             "Run DRC to verify the path."
         )
 
-    @mcp.tool()
-    @headless_compatible
-    def route_export_dsn(output_path: str = "output/routing/board.dsn") -> ToolResult:
-        """Export a Specctra DSN for FreeRouting; may require a one-time KiCad GUI step.
+    from . import routing_specctra_staging
 
-        Uses headless ``kicad-cli pcb export specctra`` when the CLI supports it. If KiCad
-        cannot export the DSN headlessly, returns a human-gated result describing the
-        File > Export > Specctra DSN step instead of failing opaquely.
-        """
-        runner = FreeRoutingRunner()
-        pcb_file = _get_pcb_file()
-        try:
-            dsn_path = runner.export_dsn(pcb_file, Path(output_path))
-        except ManualStepRequiredError as exc:
-            manual = ToolResult.failure("route_export_dsn", str(exc))
-            manual.human_gate_required = True
-            return manual
-        except (RuntimeError, ValueError) as exc:
-            return ToolResult.failure(
-                "route_export_dsn", f"Specctra DSN export is unavailable: {exc}"
-            )
-        return ToolResult.success(
-            "route_export_dsn",
-            changed=True,
-            artifacts=[ArtifactRef(path=str(dsn_path), kind="dsn")],
-            state_delta=StateDelta(
-                summary=(
-                    f"Specctra DSN ready at {_relative_project_path(dsn_path)}. "
-                    "You can route it with route_autoroute_freerouting()."
-                ),
-                changed_files=[str(dsn_path)],
-            ),
-        )
-
-    @mcp.tool()
-    @headless_compatible
-    def route_import_ses(ses_path: str = "output/routing/board.ses") -> ToolResult:
-        """Stage a routed Specctra SES and surface the required KiCad GUI import step.
-
-        KiCad has no headless SES import, so this stages the session and returns a
-        human-gated result: the routing is applied by running File > Import > Specctra
-        Session in the PCB Editor. It never reports the board as routed when it is not
-        (``changed=False``, ``human_gate_required=True``).
-        """
-        runner = FreeRoutingRunner()
-        try:
-            resolved_ses = get_config().resolve_within_project(Path(ses_path))
-            staged = runner.stage_ses(resolved_ses)
-        except (FileNotFoundError, RuntimeError, ValueError) as exc:
-            return ToolResult.failure("route_import_ses", f"Specctra SES staging failed: {exc}")
-        result = ToolResult.success(
-            "route_import_ses",
-            changed=False,
-            artifacts=[ArtifactRef(path=str(staged), kind="ses")],
-            state_delta=StateDelta(
-                summary=(
-                    f"Specctra SES session staged at {_relative_project_path(staged)}. "
-                    "KiCad has no headless SES import: open the PCB Editor and run "
-                    "File > Import > Specctra Session to apply the routing, then save."
-                ),
-                changed_files=[str(staged)],
-            ),
-        )
-        result.human_gate_required = True
-        return result
+    routing_specctra_staging.register(mcp)
 
     @mcp.tool()
     @headless_compatible
