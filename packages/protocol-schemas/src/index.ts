@@ -200,13 +200,7 @@ export interface ToolEffectManifest {
     }>;
     argument_shapes: Array<{
       argument: string;
-      value_kind:
-        | "string"
-        | "boolean"
-        | "number"
-        | "object"
-        | "collection"
-        | "unknown";
+      value_kind: "string" | "boolean" | "number" | "object" | "collection" | "unknown";
       item_kind?: "string" | "boolean" | "number" | "object" | "unknown";
       breadth_dimension?: "item_count" | "path_count";
     }>;
