@@ -5,7 +5,6 @@ import importlib.util
 from types import ModuleType, SimpleNamespace
 
 import pytest
-
 from mcp.server.mcpserver import MCPServer as FastMCP
 
 from kicad_mcp.tools.metadata import get_tool_metadata
