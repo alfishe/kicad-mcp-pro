@@ -16,7 +16,7 @@ def test_build_length_tune_rule_preserves_legacy_body() -> None:
     assert body == "\n".join(
         [
             '(rule "Length tune CLK"',
-            '  (condition "A.NetName == \'CLK\'")',
+            "  (condition \"A.NetName == 'CLK'\")",
             "  (constraint length (min 44.8000mm) (opt 45.0000mm) (max 45.2000mm))",
             ")",
         ]
@@ -53,8 +53,7 @@ def test_tune_net_preserves_missing_net_message() -> None:
     service = _service(nets={"DATA0"})
 
     assert service.tune_net("CLK", 45.0) == (
-        "Length-tuning rule was not written. "
-        "Net 'CLK' was not found on the active board."
+        "Length-tuning rule was not written. Net 'CLK' was not found on the active board."
     )
 
 
