@@ -125,6 +125,7 @@ def test_panelization_preserves_os_execution_failure(tmp_path: Path) -> None:
     )
     assert service.panelize(dry_run=False, confirm=True) == "Failed to run KiKit: runner unavailable"
 
+
 def test_panelization_executes_variants_and_preserves_failures(tmp_path: Path) -> None:
     service, calls, _pcb = _service(tmp_path)
 
