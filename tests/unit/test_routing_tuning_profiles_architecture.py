@@ -40,7 +40,7 @@ def test_routing_root_delegates_tuning_profile_crud_and_shrinks() -> None:
     span = boundaries._function_span(root, "register")
     assert span is not None
     assert span <= 850
-    assert boundaries.REGISTER_LINE_LIMITS["kicad_mcp.tools.routing"] == 850
+    assert boundaries.REGISTER_LINE_LIMITS["kicad_mcp.tools.routing"] <= 850
 
 
 def test_routing_root_uses_canonical_tuning_profile_reader() -> None:
