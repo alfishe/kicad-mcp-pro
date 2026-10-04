@@ -66,8 +66,9 @@ def test_export_dsn_preserves_success_result_contract(tmp_path: Path) -> None:
     assert result.human_gate_required is False
     assert result.tool_name == "route_export_dsn"
     assert [(artifact.path, artifact.kind) for artifact in result.artifacts] == [(str(dsn), "dsn")]
+    relative_dsn = str(Path("output") / "routing" / "board.dsn")
     assert result.state_delta.summary == (
-        "Specctra DSN ready at output/routing/board.dsn. "
+        f"Specctra DSN ready at {relative_dsn}. "
         "You can route it with route_autoroute_freerouting()."
     )
     assert result.state_delta.changed_files == [str(dsn)]
@@ -113,8 +114,9 @@ def test_import_ses_preserves_staging_and_human_gate_contract(tmp_path: Path) ->
     assert [(artifact.path, artifact.kind) for artifact in result.artifacts] == [
         (str(staged), "ses")
     ]
+    relative_ses = str(Path("output") / "routing" / "board.ses")
     assert result.state_delta.summary == (
-        "Specctra SES session staged at output/routing/board.ses. "
+        f"Specctra SES session staged at {relative_ses}. "
         "KiCad has no headless SES import: open the PCB Editor and run "
         "File > Import > Specctra Session to apply the routing, then save."
     )
