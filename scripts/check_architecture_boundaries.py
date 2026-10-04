@@ -213,10 +213,7 @@ DOMAIN_MODULES = {
     / "kicad_mcp"
     / "routing"
     / "time_domain_tuning.py",
-    "kicad_mcp.routing.manual_tracks": SRC_ROOT
-    / "kicad_mcp"
-    / "routing"
-    / "manual_tracks.py",
+    "kicad_mcp.routing.manual_tracks": SRC_ROOT / "kicad_mcp" / "routing" / "manual_tracks.py",
     _ROUTING_TUNING_PROFILES_ADAPTER: SRC_ROOT
     / "kicad_mcp"
     / "tools"
@@ -246,10 +243,7 @@ DOMAIN_MODULES = {
     / "kicad_mcp"
     / "tools"
     / "routing_time_domain_tuning.py",
-    _ROUTING_MANUAL_TRACKS_ADAPTER: SRC_ROOT
-    / "kicad_mcp"
-    / "tools"
-    / "routing_manual_tracks.py",
+    _ROUTING_MANUAL_TRACKS_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "routing_manual_tracks.py",
     _PROJECT_CONTEXT_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_context.py",
     _PROJECT_CREATION_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_creation.py",
     _PROJECT_DESIGN_SPEC_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_design_spec.py",
