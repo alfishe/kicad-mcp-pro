@@ -117,3 +117,21 @@ def test_custom_output_and_validation_errors_are_preserved(
         dry_run=True,
     )
     assert f"Output would be: {(tmp_path / 'release' / 'cpl.csv').resolve()}" in custom
+def test_rotation_table_failures_and_non_numeric_rotation_are_preserved(
+    service: ManufacturingCplRotationService,
+    tmp_path: Path,
+) -> None:
+    module = _service_module()
+
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text("{", encoding="utf-8")
+    assert module.load_rotation_table(malformed) == []
+
+    non_list = tmp_path / "non-list.json"
+    non_list.write_text(json.dumps({"entries": {}}), encoding="utf-8")
+    assert module.load_rotation_table(non_list) == []
+
+    cpl = tmp_path / "output" / "invalid-rotation.csv"
+    cpl.parent.mkdir(parents=True, exist_ok=True)
+    cpl.write_text("Ref,Package,Rot\nD1,SOT-23-3,not-a-number\n", encoding="utf-8")
+    assert service.correct("output/invalid-rotation.csv") == "No rotation corrections needed for any component."
