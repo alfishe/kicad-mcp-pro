@@ -198,6 +198,18 @@ export interface ToolEffectManifest {
       default?: string;
       base_argument?: string;
     }>;
+    argument_shapes: Array<{
+      argument: string;
+      value_kind:
+        | "string"
+        | "boolean"
+        | "number"
+        | "object"
+        | "collection"
+        | "unknown";
+      item_kind?: "string" | "boolean" | "number" | "object" | "unknown";
+      breadth_dimension?: "item_count" | "path_count";
+    }>;
     destructive: boolean;
     idempotent: boolean;
     supports_dry_run: boolean;
