@@ -60,16 +60,12 @@ def test_export_dsn_preserves_success_result_contract(tmp_path: Path) -> None:
 
     result = service.export_dsn()
 
-    assert runner.export_calls == [
-        (tmp_path / "demo.kicad_pcb", Path("output/routing/board.dsn"))
-    ]
+    assert runner.export_calls == [(tmp_path / "demo.kicad_pcb", Path("output/routing/board.dsn"))]
     assert result.ok is True
     assert result.changed is True
     assert result.human_gate_required is False
     assert result.tool_name == "route_export_dsn"
-    assert [(artifact.path, artifact.kind) for artifact in result.artifacts] == [
-        (str(dsn), "dsn")
-    ]
+    assert [(artifact.path, artifact.kind) for artifact in result.artifacts] == [(str(dsn), "dsn")]
     assert result.state_delta.summary == (
         "Specctra DSN ready at output/routing/board.dsn. "
         "You can route it with route_autoroute_freerouting()."
