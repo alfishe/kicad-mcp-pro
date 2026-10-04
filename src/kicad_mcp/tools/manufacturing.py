@@ -8,15 +8,8 @@ Tools in this module complement ``export_manufacturing_package`` with:
 
 from __future__ import annotations
 
-from typing import Literal
-
-import structlog
 from mcp.server.mcpserver import MCPServer as FastMCP
 
-
-logger = structlog.get_logger(__name__)
-
-PanelLayout = Literal["grid", "mousebites", "vcut"]
 
 
 def register(mcp: FastMCP) -> None:
