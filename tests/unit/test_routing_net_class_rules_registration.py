@@ -29,9 +29,7 @@ class FakeService:
         via_diameter_mm: float,
         via_drill_mm: float,
     ) -> str:
-        self.calls.append(
-            (net_class, width_mm, clearance_mm, via_diameter_mm, via_drill_mm)
-        )
+        self.calls.append((net_class, width_mm, clearance_mm, via_diameter_mm, via_drill_mm))
         return "delegated"
 
 
