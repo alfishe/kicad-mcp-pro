@@ -37,7 +37,10 @@ test("exports every protocol schema definition and filesystem path", () => {
       schema.$schema,
       "https://json-schema.org/draft/2020-12/schema",
     );
-    assert.equal(protocolSchemaVersion(schemaName), "1.0.0");
+    assert.equal(
+      protocolSchemaVersion(schemaName),
+      schemaName === "tool-effect-manifest" ? "2.0.0" : "1.0.0",
+    );
     assert.ok(fs.existsSync(protocolSchemaPath(schemaName)));
   }
 });
@@ -90,6 +93,26 @@ test("rejects payloads that declare an unsupported schema major", () => {
   ]);
 });
 
+test("rejects v1 tool-effect manifests after the v2 argument-shape contract", () => {
+  const invalid = validateToolEffectManifest({
+    schemaVersion: "1.0.0",
+    source: {
+      repository: "oaslananka/kicad-mcp-pro",
+      version: "3.37.0",
+      reviewed_source_sha: "66c0cd2750b8d79d717ece5299ec8da995f775cd",
+    },
+    tools: [],
+  });
+
+  assert.equal(invalid.valid, false);
+  assert.ok(
+    invalid.errors.some(
+      (error) =>
+        error.keyword === "schemaMajor" && error.path === "/schemaVersion",
+    ),
+  );
+});
+
 test("validates shared protocol payload families", () => {
   assert.equal(
     validateToolCapabilityMetadata({
@@ -128,10 +151,10 @@ test("validates shared protocol payload families", () => {
 
   assert.equal(
     validateToolEffectManifest({
-      schemaVersion: "1.0.0",
+      schemaVersion: "2.0.0",
       source: {
         repository: "oaslananka/kicad-mcp-pro",
-        version: "3.35.2",
+        version: "3.37.0",
         reviewed_source_sha: "e460e28a4dd0f2c105a1d2db3e26eb731769c543",
       },
       tools: [
@@ -146,6 +169,7 @@ test("validates shared protocol payload families", () => {
               required: false,
             },
           ],
+          argument_shapes: [],
           destructive: false,
           idempotent: true,
           supports_dry_run: false,

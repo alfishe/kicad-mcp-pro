@@ -32,6 +32,14 @@ that supports schema major `1` may accept any `1.x.y` payload after validation.
 Consumers must reject unknown major versions unless the caller explicitly opts
 into compatibility fallback behavior.
 
+### Tool-effect manifest v2
+
+`tool-effect-manifest` schema `2.0.0` adds required reviewed
+`argument_shapes` facts. Consumers of the v1 manifest must not silently accept
+v2 payloads: they must add explicit v2 support or continue to fail closed on the
+unknown major. The next `@oaslananka/kicad-protocol-schemas` release containing
+this contract must therefore be on the package 2.x line.
+
 ## Migration policy
 
 Schema migrations are additive first. When a field must be renamed or removed,

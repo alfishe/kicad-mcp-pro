@@ -80,6 +80,7 @@
         "arguments",
         "effects",
         "path_arguments",
+        "argument_shapes",
         "destructive",
         "idempotent",
         "supports_dry_run",
@@ -145,6 +146,13 @@
           },
           "minItems": 1,
           "uniqueItems": true
+        },
+        "argument_shapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/argumentShape"
+          },
+          "uniqueItems": true
         }
       },
       "anyOf": [
@@ -163,11 +171,65 @@
           }
         }
       ]
+    },
+    "argumentShape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["argument", "value_kind"],
+      "properties": {
+        "argument": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "value_kind": {
+          "enum": [
+            "string",
+            "boolean",
+            "number",
+            "object",
+            "collection",
+            "unknown"
+          ]
+        },
+        "item_kind": {
+          "enum": ["string", "boolean", "number", "object", "unknown"]
+        },
+        "breadth_dimension": {
+          "enum": ["item_count", "path_count"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "value_kind": {
+                "const": "collection"
+              }
+            },
+            "required": ["value_kind"]
+          },
+          "then": {
+            "required": ["item_kind"]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["item_kind"]
+                },
+                {
+                  "required": ["breadth_dimension"]
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   },
   "x-kicad-studio-kit": {
     "trackingIssue": "OASLANA-52",
-    "schemaVersion": "1.0.0"
+    "schemaVersion": "2.0.0"
   },
   "x-kicad-mcp": {
     "trackingIssue": "OASLANA-52",
