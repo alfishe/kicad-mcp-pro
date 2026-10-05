@@ -42,7 +42,6 @@ from ..utils.impedance import (
     DIELECTRIC_LIBRARY,
     differential_impedance,
     get_dielectric,
-    list_dielectric_materials,
     propagation_delay_ps_per_mm,
     recommend_dielectric_for_frequency,
     recommended_decoupling_distance_mm,
@@ -834,21 +833,9 @@ def register(mcp: FastMCP) -> None:
         )
         return "\n".join(lines)
 
-    @mcp.tool()
-    def si_list_dielectric_materials() -> str:
-        """List all built-in dielectric materials with Er, loss tangent, and frequency range.
+    from . import signal_integrity_dielectric_materials
 
-        Use the returned material keys with si_synthesize_stackup_for_interfaces()
-        to select the appropriate laminate for your design.
-        """
-        materials = list_dielectric_materials()
-        lines = [f"Available dielectric materials ({len(materials)} total):", ""]
-        for m in materials:
-            lines.append(f"  [{m['key']}] {m['name']}  Er={m['er']}  tan_d={m['loss_tangent']}")
-            lines.append(f"    {m['description']}")
-            lines.append("")
-        lines.append("Use key string with si_synthesize_stackup_for_interfaces().")
-        return "\n".join(lines)
+    signal_integrity_dielectric_materials.register(mcp)
 
     @mcp.tool()
     def si_synthesize_stackup_for_interfaces(
