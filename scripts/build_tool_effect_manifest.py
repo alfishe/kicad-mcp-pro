@@ -13,6 +13,7 @@ from kicad_mcp.tool_effect_manifest import (
     REVIEWED_TOOL_EFFECTS,
     SCHEMA_VERSION,
     SOURCE_REPOSITORY,
+    ArgumentShapeFact,
     PathArgumentEffect,
 )
 
@@ -23,6 +24,18 @@ MANIFEST_PATH = ROOT / "contracts" / "tool-effect-manifest.json"
 def _package_version() -> str:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     return str(data["project"]["version"])
+
+
+def _argument_shape_payload(argument_shape: ArgumentShapeFact) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "argument": argument_shape.argument,
+        "value_kind": argument_shape.value_kind,
+    }
+    if argument_shape.item_kind is not None:
+        payload["item_kind"] = argument_shape.item_kind
+    if argument_shape.breadth_dimension is not None:
+        payload["breadth_dimension"] = argument_shape.breadth_dimension
+    return payload
 
 
 def _path_argument_payload(path_argument: PathArgumentEffect) -> dict[str, Any]:
@@ -49,6 +62,10 @@ def build() -> dict[str, Any]:
                 "path_arguments": [
                     _path_argument_payload(path_argument)
                     for path_argument in contract.path_arguments
+                ],
+                "argument_shapes": [
+                    _argument_shape_payload(argument_shape)
+                    for argument_shape in contract.argument_shapes
                 ],
                 "destructive": contract.destructive,
                 "idempotent": contract.idempotent,
