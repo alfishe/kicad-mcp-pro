@@ -55,4 +55,4 @@ def test_si_root_drops_solver_capability_only_dependencies() -> None:
     assert "thermal_method" not in source
     assert "thermal_fd_method" not in source
     assert "emc_method" not in source
-    assert "channel_method" in source
+    assert "channel_method" not in source
