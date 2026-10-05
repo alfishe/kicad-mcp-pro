@@ -56,6 +56,8 @@ _ROUTING_TIME_DOMAIN_TUNING_ADAPTER = "kicad_mcp.tools.routing_time_domain_tunin
 _ROUTING_MANUAL_TRACKS_ADAPTER = "kicad_mcp.tools.routing_manual_tracks"
 _ROUTING_SES_APPLY_ADAPTER = "kicad_mcp.tools.routing_ses_apply"
 _ROUTING_AUTOROUTER_ADAPTER = "kicad_mcp.tools.routing_autorouter"
+_SIGNAL_INTEGRITY_ROOT_MODULE = "kicad_mcp.tools.signal_integrity"
+_SIGNAL_INTEGRITY_IMPEDANCE_ADAPTER = "kicad_mcp.tools.signal_integrity_impedance"
 
 DOMAIN_MODULES = {
     "kicad_mcp.ir.engineering_graph": SRC_ROOT / "kicad_mcp" / "ir" / "engineering_graph.py",
@@ -250,6 +252,15 @@ DOMAIN_MODULES = {
     _ROUTING_MANUAL_TRACKS_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "routing_manual_tracks.py",
     _ROUTING_SES_APPLY_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "routing_ses_apply.py",
     _ROUTING_AUTOROUTER_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "routing_autorouter.py",
+    _SIGNAL_INTEGRITY_ROOT_MODULE: SRC_ROOT / "kicad_mcp" / "tools" / "signal_integrity.py",
+    "kicad_mcp.signal_integrity.impedance": SRC_ROOT
+    / "kicad_mcp"
+    / "signal_integrity"
+    / "impedance.py",
+    _SIGNAL_INTEGRITY_IMPEDANCE_ADAPTER: SRC_ROOT
+    / "kicad_mcp"
+    / "tools"
+    / "signal_integrity_impedance.py",
     _PROJECT_CONTEXT_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_context.py",
     _PROJECT_CREATION_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_creation.py",
     _PROJECT_DESIGN_SPEC_ADAPTER: SRC_ROOT / "kicad_mcp" / "tools" / "project_design_spec.py",
@@ -474,6 +485,7 @@ DOMAIN_MODULES = {
 }
 
 PURE_HELPERS = {
+    "kicad_mcp.signal_integrity.impedance",
     "kicad_mcp.routing.tuning_profiles",
     "kicad_mcp.routing.specctra_staging",
     "kicad_mcp.routing.net_class_rules",
@@ -575,6 +587,7 @@ FORBIDDEN_PURE_IMPORT_PREFIXES = (
 )
 
 ADAPTER_FORBIDDEN_IMPORT_PREFIXES = {
+    _SIGNAL_INTEGRITY_IMPEDANCE_ADAPTER: (_SIGNAL_INTEGRITY_ROOT_MODULE,),
     _ROUTING_TUNING_PROFILES_ADAPTER: (_ROUTING_ROOT_MODULE,),
     _ROUTING_SPECCTRA_STAGING_ADAPTER: (_ROUTING_ROOT_MODULE,),
     _ROUTING_NET_CLASS_RULES_ADAPTER: (_ROUTING_ROOT_MODULE,),
@@ -693,6 +706,8 @@ REGISTER_LINE_LIMITS = {
     _ROUTING_MANUAL_TRACKS_ADAPTER: 120,
     _ROUTING_SES_APPLY_ADAPTER: 75,
     _ROUTING_AUTOROUTER_ADAPTER: 105,
+    _SIGNAL_INTEGRITY_ROOT_MODULE: 730,
+    _SIGNAL_INTEGRITY_IMPEDANCE_ADAPTER: 90,
     _PROJECT_CONTEXT_ADAPTER: 55,
     _PROJECT_CREATION_ADAPTER: 55,
     _PROJECT_DESIGN_SPEC_ADAPTER: 120,

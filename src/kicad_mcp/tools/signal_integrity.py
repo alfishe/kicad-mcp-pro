@@ -26,8 +26,6 @@ from ..models.signal_integrity import (
     HighSpeedChannelInput,
     LengthMatchingInput,
     StackupInput,
-    TraceImpedanceInput,
-    TraceWidthForImpedanceInput,
     ViaStubInput,
 )
 from ..models.verdict import VerdictReport
@@ -42,7 +40,6 @@ from ..utils.channel import (
 from ..utils.field_solver import impedance_method
 from ..utils.impedance import (
     DIELECTRIC_LIBRARY,
-    copper_thickness_mm,
     differential_impedance,
     get_dielectric,
     list_dielectric_materials,
@@ -289,41 +286,6 @@ def _via_stub_length_mm(via: _ViaLike) -> float:
     return board_thickness_mm
 
 
-def _format_impedance_result(
-    *,
-    title: str,
-    trace_type: str,
-    width_mm: float,
-    height_mm: float,
-    er: float,
-    copper_oz: float,
-    impedance_ohm: float,
-    effective_er: float,
-    spacing_mm: float | None = None,
-    differential_ohm: float | None = None,
-) -> str:
-    lines = [
-        title,
-        f"- Trace type: {trace_type}",
-        f"- Width: {width_mm:.4f} mm",
-        f"- Dielectric height: {height_mm:.4f} mm",
-        f"- Copper: {copper_oz:.2f} oz ({copper_thickness_mm(copper_oz):.4f} mm)",
-        f"- Relative permittivity (Er): {er:.3f}",
-        f"- Effective permittivity: {effective_er:.3f}",
-        f"- Estimated single-ended impedance: {impedance_ohm:.2f} ohm",
-    ]
-    if spacing_mm is not None:
-        lines.append(f"- Gap / spacing: {spacing_mm:.4f} mm")
-    if differential_ohm is not None:
-        lines.append(f"- Estimated differential impedance: {differential_ohm:.2f} ohm")
-    method = impedance_method()
-    lines.append(f"- Method: {method['method']} — {method['accuracy']}")
-    lines.append(f"- {format_solver_verdict(method)}")
-    if not method["solver_grade"]:
-        lines.append(f"- Note: {method['note']}")
-    return "\n".join(lines)
-
-
 def _channel_output_dir() -> Path:
     return get_config().ensure_output_dir("channel")
 
@@ -505,98 +467,9 @@ def register(mcp: FastMCP) -> None:
             sort_keys=True,
         )
 
-    @mcp.tool()
-    def si_calculate_trace_impedance(
-        width_mm: float,
-        height_mm: float,
-        er: float = 4.2,
-        trace_type: str = "microstrip",
-        copper_oz: float = 1.0,
-        spacing_mm: float = 0.2,
-    ) -> str:
-        """Estimate PCB trace impedance using quasi-static interconnect formulas."""
-        payload = TraceImpedanceInput(
-            width_mm=width_mm,
-            height_mm=height_mm,
-            er=er,
-            trace_type=trace_type,
-            copper_oz=copper_oz,
-            spacing_mm=spacing_mm,
-        )
-        impedance_ohm, effective_er = trace_impedance(
-            payload.width_mm,
-            payload.height_mm,
-            payload.er,
-            trace_type=payload.trace_type,
-            copper_oz=payload.copper_oz,
-            spacing_mm=payload.spacing_mm,
-        )
-        differential_ohm, _ = differential_impedance(
-            payload.width_mm,
-            payload.height_mm,
-            payload.spacing_mm,
-            payload.er,
-            trace_type=payload.trace_type,
-            copper_oz=payload.copper_oz,
-        )
-        return _format_impedance_result(
-            title="Trace impedance estimate:",
-            trace_type=payload.trace_type,
-            width_mm=payload.width_mm,
-            height_mm=payload.height_mm,
-            er=payload.er,
-            copper_oz=payload.copper_oz,
-            impedance_ohm=impedance_ohm,
-            effective_er=effective_er,
-            spacing_mm=payload.spacing_mm,
-            differential_ohm=differential_ohm,
-        )
+    from . import signal_integrity_impedance
 
-    @mcp.tool()
-    def si_calculate_trace_width_for_impedance(
-        target_ohm: float,
-        height_mm: float,
-        er: float = 4.2,
-        trace_type: str = "microstrip",
-        copper_oz: float = 1.0,
-        spacing_mm: float = 0.2,
-    ) -> str:
-        """Solve for a trace width that meets the requested impedance target."""
-        payload = TraceWidthForImpedanceInput(
-            target_ohm=target_ohm,
-            height_mm=height_mm,
-            er=er,
-            trace_type=trace_type,
-            copper_oz=copper_oz,
-            spacing_mm=spacing_mm,
-        )
-        solved_width_mm = solve_width_for_impedance(
-            payload.target_ohm,
-            payload.height_mm,
-            payload.er,
-            trace_type=payload.trace_type,
-            copper_oz=payload.copper_oz,
-            spacing_mm=payload.spacing_mm,
-        )
-        impedance_ohm, effective_er = trace_impedance(
-            solved_width_mm,
-            payload.height_mm,
-            payload.er,
-            trace_type=payload.trace_type,
-            copper_oz=payload.copper_oz,
-            spacing_mm=payload.spacing_mm,
-        )
-        return _format_impedance_result(
-            title=f"Width synthesis for {payload.target_ohm:.2f} ohm:",
-            trace_type=payload.trace_type,
-            width_mm=solved_width_mm,
-            height_mm=payload.height_mm,
-            er=payload.er,
-            copper_oz=payload.copper_oz,
-            impedance_ohm=impedance_ohm,
-            effective_er=effective_er,
-            spacing_mm=payload.spacing_mm,
-        )
+    signal_integrity_impedance.register(mcp)
 
     @mcp.tool()
     def si_check_differential_pair_skew(
