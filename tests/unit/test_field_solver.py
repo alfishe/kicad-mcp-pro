@@ -7,7 +7,7 @@ import json
 import pytest
 
 from kicad_mcp.server import build_server
-from kicad_mcp.tools.signal_integrity import _format_impedance_result
+from kicad_mcp.signal_integrity.impedance import format_impedance_result
 from kicad_mcp.utils.field_solver import (
     CLOSED_FORM_METHOD,
     field_solver_available,
@@ -31,7 +31,7 @@ def test_no_field_solver_is_integrated_yet() -> None:
 
 
 def test_impedance_result_states_its_method() -> None:
-    text = _format_impedance_result(
+    text = format_impedance_result(
         title="Trace impedance estimate:",
         trace_type="microstrip",
         width_mm=0.3,
