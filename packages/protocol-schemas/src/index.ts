@@ -207,7 +207,12 @@ export interface ToolEffectManifest {
         | "object"
         | "collection"
         | "unknown";
-      item_kind?: "string" | "boolean" | "number" | "object" | "unknown";
+      item_kind?:
+        | "string"
+        | "boolean"
+        | "number"
+        | "object"
+        | "unknown";
       breadth_dimension?: "item_count" | "path_count";
     }>;
     destructive: boolean;
