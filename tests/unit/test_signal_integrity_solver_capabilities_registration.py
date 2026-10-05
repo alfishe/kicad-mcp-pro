@@ -16,9 +16,7 @@ class FakeService:
 
 
 def test_registration_preserves_signature_docstring_order_and_delegation() -> None:
-    adapter = importlib.import_module(
-        "kicad_mcp.tools.signal_integrity_solver_capabilities"
-    )
+    adapter = importlib.import_module("kicad_mcp.tools.signal_integrity_solver_capabilities")
     server = FastMCP("si-solver-capabilities-registration")
     service = FakeService()
 
