@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -17,6 +18,15 @@ from typing import Any
 
 import yaml
 
+from kicad_mcp.evals.connectivity_differential import build_connectivity_differential_result
+from kicad_mcp.evals.semantic_differential import (
+    DifferentialLane,
+    DifferentialResult,
+    aggregate_differential_results,
+    classify_differential_result,
+    render_differential_report_json,
+)
+
 try:
     from scripts.runtime_path_safety import approved_runtime_path
 except ModuleNotFoundError:  # Direct `python scripts/foo.py` execution.
@@ -29,6 +39,15 @@ DEFAULT_TIMEOUT_SECONDS = 180
 KICAD_VIOLATION_EXIT_CODE = 5
 WINDOWS_PRIMARY_RUNNER = "windows-2025-vs2026"
 WINDOWS_PRIMARY_KICAD_VERSION = "10.0.6"
+
+CONNECTIVITY_DIFFERENTIAL_FIXTURE = (
+    REPO_ROOT
+    / "examples"
+    / "gallery"
+    / "esp32-c3-wroom-02-breakout"
+    / "esp32-c3-wroom-02-breakout.kicad_sch"
+)
+CONNECTIVITY_DIFFERENTIAL_FIXTURE_ID = "gallery-esp32-c3-wroom-02-breakout"
 
 INSTALLERS = {
     "10.0.x": {
@@ -89,6 +108,15 @@ def _expected_major(kicad_range: str) -> int:
     if match is None:
         raise ValueError(f"Cannot derive KiCad major version from range {kicad_range!r}")
     return int(match.group("major"))
+
+
+def _differential_lane_for_range(kicad_range: str) -> DifferentialLane | None:
+    """Map supported native semantic canary ranges to separately attributable lanes."""
+    if kicad_range == "10.0.x":
+        return "stable"
+    if kicad_range == "10.99.x" or _expected_major(kicad_range) >= 11:
+        return "preview"
+    return None
 
 
 def _linux_release_lane(entry: object) -> dict[str, object]:
@@ -277,6 +305,7 @@ def _command_plan(
     reports = artifacts / "reports"
     manufacturing = artifacts / "manufacturing"
     graphics = artifacts / "graphics"
+    differential = artifacts / "differential"
     readonly_output = artifacts / "readonly-project"
     manufacturing_skip = _feature_skip_reason(compatibility, "manufacturingExports", kicad_range)
     kicad10_export_skip = _feature_skip_reason(
@@ -454,6 +483,26 @@ def _command_plan(
                 str(clean_schematic),
             ),
             outputs=(reports / "netlist.net",),
+        ),
+        CanaryStep(
+            name="differential-connectivity-netlist",
+            fixture=CONNECTIVITY_DIFFERENTIAL_FIXTURE_ID,
+            args=(
+                "sch",
+                "export",
+                "netlist",
+                "--format",
+                "kicadsexpr",
+                "--output",
+                str(differential / "connectivity-native.net"),
+                str(CONNECTIVITY_DIFFERENTIAL_FIXTURE),
+            ),
+            outputs=(differential / "connectivity-native.net",),
+            skip_reason=(
+                None
+                if _differential_lane_for_range(kicad_range) is not None
+                else "connectivity differential requires the stable KiCad 10 or preview KiCad 11 lane"
+            ),
         ),
         CanaryStep(
             name="board-stats",
@@ -879,6 +928,105 @@ def _run_step(cli: Path, step: CanaryStep, artifacts: Path) -> dict[str, object]
     return step_result
 
 
+def _source_sha() -> str:
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    if status.returncode != 0 or status.stdout.strip():
+        raise RuntimeError("Differential canary evidence requires a clean source tree")
+
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    source_sha = result.stdout.strip()
+    if result.returncode != 0 or re.fullmatch(r"[0-9a-f]{40,64}", source_sha) is None:
+        raise RuntimeError("Could not resolve exact source SHA for differential canary evidence")
+    return source_sha
+
+
+def _fixture_hash(path: Path) -> str:
+    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+
+
+def _native_net_map(path: Path) -> dict[tuple[str, str], str]:
+    from kicad_mcp.tools.schematic_transfer import _parse_netlist_text
+
+    return _parse_netlist_text(path.read_text(encoding="utf-8", errors="strict"))
+
+
+def _connectivity_groups(path: Path) -> list[dict[str, Any]]:
+    from kicad_mcp.tools.schematic import build_connectivity_groups
+
+    return build_connectivity_groups(path)
+
+
+def _kicad_version_from_result(version_result: dict[str, object]) -> str | None:
+    stdout_path = Path(str(version_result["stdout"]))
+    stderr_path = Path(str(version_result["stderr"]))
+    output = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in (stdout_path, stderr_path)
+        if path.exists()
+    )
+    match = re.search(r"\b(?P<version>\d+\.\d+(?:\.\d+)?)\b", output)
+    return match.group("version") if match is not None else None
+
+
+def _write_connectivity_differential_report(
+    *,
+    artifacts: Path,
+    kicad_range: str,
+    kicad_version: str,
+    native_netlist: Path,
+) -> DifferentialResult | None:
+    lane = _differential_lane_for_range(kicad_range)
+    if lane is None:
+        return None
+
+    fixture_hash = _fixture_hash(CONNECTIVITY_DIFFERENTIAL_FIXTURE)
+    source_sha = _source_sha()
+    try:
+        result = build_connectivity_differential_result(
+            source_sha=source_sha,
+            lane=lane,
+            kicad_version=kicad_version,
+            fixture_id=CONNECTIVITY_DIFFERENTIAL_FIXTURE_ID,
+            fixture_hash=fixture_hash,
+            native_net_map=_native_net_map(native_netlist),
+            custom_groups=_connectivity_groups(CONNECTIVITY_DIFFERENTIAL_FIXTURE),
+        )
+    except (OSError, ValueError, RuntimeError, TypeError) as exc:
+        result = classify_differential_result(
+            source_sha=source_sha,
+            lane=lane,
+            kicad_version=kicad_version,
+            fixture_id=CONNECTIVITY_DIFFERENTIAL_FIXTURE_ID,
+            fixture_hash=fixture_hash,
+            operation="connectivity.net-compilation",
+            authority="kicad-cli:sch-export-netlist-kicadsexpr",
+            comparison_method="pin-membership-sha256.v1",
+            native_result_hash=None,
+            custom_result_hash=None,
+            infrastructure_valid=False,
+            reason=f"Connectivity differential infrastructure failed ({type(exc).__name__}).",
+        )
+    report = aggregate_differential_results([result])
+    _write_text(
+        artifacts / "differential" / "summary.json", render_differential_report_json(report)
+    )
+    return result
+
+
 def _version_range_error(version_result: dict[str, object], kicad_range: str) -> str | None:
     stdout_path = Path(str(version_result["stdout"]))
     stderr_path = Path(str(version_result["stderr"]))
@@ -956,9 +1104,28 @@ def run_canary(artifacts: Path, kicad_range: str) -> int:
         version["ok"] = False
         version["error"] = version_error
 
-    failing_fixtures = sorted(
-        {str(result["fixture"]) for result in results if not bool(result["ok"])}
+    differential_result: DifferentialResult | None = None
+    kicad_version = _kicad_version_from_result(version)
+    connectivity_step = next(
+        (result for result in results if result.get("name") == "differential-connectivity-netlist"),
+        None,
     )
+    if (
+        kicad_version is not None
+        and connectivity_step is not None
+        and not bool(connectivity_step.get("skipped"))
+    ):
+        differential_result = _write_connectivity_differential_report(
+            artifacts=artifacts,
+            kicad_range=kicad_range,
+            kicad_version=kicad_version,
+            native_netlist=artifacts / "differential" / "connectivity-native.net",
+        )
+
+    failing_fixture_set = {str(result["fixture"]) for result in results if not bool(result["ok"])}
+    if differential_result is not None and differential_result.status != "match":
+        failing_fixture_set.add(differential_result.fixture_id)
+    failing_fixtures = sorted(failing_fixture_set)
     summary = {
         "kicadRange": kicad_range,
         "kicadCli": str(cli),
@@ -970,6 +1137,9 @@ def run_canary(artifacts: Path, kicad_range: str) -> int:
         "results": results,
         "failingFixtures": failing_fixtures,
     }
+    if differential_result is not None:
+        summary["differentialReport"] = "differential/summary.json"
+        summary["differentialStatus"] = differential_result.status
     _write_text(artifacts / "summary.json", json.dumps(summary, indent=2, sort_keys=True) + "\n")
     _write_text(artifacts / "failing-fixtures.txt", "\n".join(failing_fixtures) + "\n")
 

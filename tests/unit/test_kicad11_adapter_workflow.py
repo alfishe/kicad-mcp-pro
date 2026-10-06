@@ -15,6 +15,10 @@ def test_kicad11_workflow_reports_read_write_and_export_artifacts_separately() -
         "src/kicad_mcp/adapter_matrix.py",
         "src/kicad_mcp/ipc/**",
         "src/kicad_mcp/server_info.py",
+        "src/kicad_mcp/evals/__init__.py",
+        "src/kicad_mcp/evals/semantic_differential.py",
+        "src/kicad_mcp/evals/connectivity_differential.py",
+        "examples/gallery/esp32-c3-wroom-02-breakout/**",
         "integrations/common/kicad-adapter-matrix.json",
     ):
         assert workflow.count(protected_path) == 2
