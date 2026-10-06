@@ -40,7 +40,16 @@ def test_stable_kicad_workflow_pins_10_0_6_canary() -> None:
     assert "kicad-10-0-5-canary:" not in workflow
 
 
+def test_kicad_live_e2e_records_exact_differential_source_sha() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "KICAD_DIFFERENTIAL_SOURCE_SHA" in workflow
+    assert "github.event.pull_request.head.sha || github.sha" in workflow
+
+
 def test_kicad_live_e2e_tracks_shared_fixture_corpus() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert workflow.count("packages/kicad-fixtures/fixtures/**") == 2
+    assert workflow.count("src/kicad_mcp/evals/semantic_differential*.py") == 2
+    assert workflow.count("examples/gallery/esp32-c3-wroom-02-breakout/**") == 2

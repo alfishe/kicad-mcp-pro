@@ -8,6 +8,8 @@ on:
     paths:
       - "scripts/kicad_canary.py"
       - "scripts/kicad11_headless_canary.py"
+      - "src/kicad_mcp/evals/semantic_differential*.py"
+      - "examples/gallery/esp32-c3-wroom-02-breakout/**"
       - "scripts/build_adapter_matrix.py"
       - "src/kicad_mcp/adapter_matrix.py"
       - "src/kicad_mcp/ipc/**"
@@ -24,6 +26,8 @@ on:
     paths:
       - "scripts/kicad_canary.py"
       - "scripts/kicad11_headless_canary.py"
+      - "src/kicad_mcp/evals/semantic_differential*.py"
+      - "examples/gallery/esp32-c3-wroom-02-breakout/**"
       - "scripts/build_adapter_matrix.py"
       - "src/kicad_mcp/adapter_matrix.py"
       - "src/kicad_mcp/ipc/**"
@@ -38,6 +42,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  KICAD_DIFFERENTIAL_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

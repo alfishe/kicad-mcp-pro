@@ -60,6 +60,16 @@ from .semantic_differential import (
     classify_differential_result,
     render_differential_report_json,
 )
+from .semantic_differential_connectivity import (
+    CONNECTIVITY_AUTHORITY,
+    CONNECTIVITY_COMPARISON_METHOD,
+    CONNECTIVITY_OPERATION,
+    classify_connectivity_differential,
+    connectivity_signature_hash,
+    fixture_file_hash,
+    normalize_custom_connectivity,
+    normalize_native_connectivity,
+)
 from .task_outcome_reporting import (
     render_task_outcome_summary_json,
     render_task_outcome_summary_text,
@@ -111,6 +121,14 @@ from .tool_selection import (
 )
 
 __all__ = [
+    "CONNECTIVITY_AUTHORITY",
+    "CONNECTIVITY_COMPARISON_METHOD",
+    "CONNECTIVITY_OPERATION",
+    "classify_connectivity_differential",
+    "connectivity_signature_hash",
+    "fixture_file_hash",
+    "normalize_custom_connectivity",
+    "normalize_native_connectivity",
     "DIFFERENTIAL_REPORT_SCHEMA_VERSION",
     "DIFFERENTIAL_RESULT_SCHEMA_VERSION",
     "DifferentialLane",

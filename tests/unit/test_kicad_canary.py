@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from scripts import kicad_canary
 from scripts.kicad_canary import CanaryStep, build_canary_matrix, supports_feature_gate
@@ -460,3 +463,267 @@ def test_public_compatibility_docs_use_current_compatibility_command() -> None:
     for path in compatibility_docs:
         raw = path.read_text(encoding="utf-8")
         assert "corepack pnpm run check:compatibility" not in raw, path
+
+
+def test_connectivity_differential_uses_gallery_fixture_and_stable_preview_lanes(
+    tmp_path: Path,
+) -> None:
+    steps = {
+        step.name: step
+        for step in kicad_canary._command_plan(tmp_path, _compatibility_matrix(), "10.0.x")
+    }
+
+    connectivity = steps["connectivity-native-netlist"]
+    assert connectivity.fixture == "esp32-c3-wroom-02-breakout"
+    assert connectivity.skip_reason is None
+    assert str(tmp_path / "workspace" / "esp32-c3-wroom-02-breakout") in " ".join(connectivity.args)
+    assert kicad_canary._differential_lane(_compatibility_matrix(), "10.0.x") == "stable"
+    assert kicad_canary._differential_lane(_compatibility_matrix(), "10.99.x") == "preview"
+    assert kicad_canary._differential_lane(_compatibility_matrix(), "11.0.x") == "preview"
+
+
+def test_connectivity_differential_is_structured_skip_on_pre_kicad10_lane(tmp_path: Path) -> None:
+    steps = {
+        step.name: step
+        for step in kicad_canary._command_plan(tmp_path, _compatibility_matrix(), "9.x")
+    }
+
+    connectivity = steps["connectivity-native-netlist"]
+    assert connectivity.skip_reason == "semantic connectivity differential requires KiCad 10+"
+
+
+def _write_connectivity_differential_inputs(tmp_path: Path) -> tuple[Path, dict[str, object]]:
+    artifacts = tmp_path / "artifacts"
+    fixture = artifacts / "workspace" / "esp32-c3-wroom-02-breakout"
+    reports = artifacts / "reports"
+    logs = artifacts / "logs"
+    fixture.mkdir(parents=True)
+    reports.mkdir(parents=True)
+    logs.mkdir(parents=True)
+    (fixture / "demo.kicad_sch").write_text("(kicad_sch)\n", encoding="utf-8")
+    (reports / "connectivity-native.net").write_text(
+        "(export (nets\n"
+        '  (net (code "1") (name "/EN")\n'
+        '    (node (ref "C1") (pin "1"))\n'
+        '    (node (ref "U1") (pin "2"))))\n'
+        ")\n",
+        encoding="utf-8",
+    )
+    (logs / "version.stdout.log").write_text("10.0.6\n", encoding="utf-8")
+    (logs / "version.stderr.log").write_text("", encoding="utf-8")
+    version = {
+        "stdout": str(logs / "version.stdout.log"),
+        "stderr": str(logs / "version.stderr.log"),
+    }
+    return artifacts, version
+
+
+def test_connectivity_differential_writes_match_report(tmp_path: Path, monkeypatch) -> None:
+    artifacts, version = _write_connectivity_differential_inputs(tmp_path)
+    monkeypatch.setattr(kicad_canary, "_source_sha", lambda: "a" * 40)
+    monkeypatch.setattr(
+        kicad_canary,
+        "_custom_connectivity_groups",
+        lambda _schematic: [
+            {
+                "names": ["EN"],
+                "pins": [
+                    {"reference": "U1", "pin": "2"},
+                    {"reference": "C1", "pin": "1"},
+                ],
+            }
+        ],
+    )
+
+    result = kicad_canary._run_connectivity_differential(
+        artifacts=artifacts,
+        compatibility=_compatibility_matrix(),
+        kicad_range="10.0.x",
+        version_result=version,
+        native_step={"ok": True},
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "match"
+    report = json.loads(
+        (artifacts / "reports" / "semantic-differential-connectivity.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert report["schema_version"] == "kicad-semantic-differential-report.v1"
+    assert report["source_sha"] == "a" * 40
+    assert report["lane"] == "stable"
+    assert report["kicad_version"] == "10.0.6"
+    assert report["match_count"] == 1
+    assert report["divergence_count"] == 0
+
+
+def test_connectivity_differential_seeded_divergence_fails_canary_step(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    artifacts, version = _write_connectivity_differential_inputs(tmp_path)
+    monkeypatch.setattr(kicad_canary, "_source_sha", lambda: "a" * 40)
+    monkeypatch.setattr(
+        kicad_canary,
+        "_custom_connectivity_groups",
+        lambda _schematic: [
+            {"names": ["EN"], "pins": [{"reference": "C1", "pin": "1"}]},
+            {"names": [], "pins": [{"reference": "U1", "pin": "2"}]},
+        ],
+    )
+
+    result = kicad_canary._run_connectivity_differential(
+        artifacts=artifacts,
+        compatibility=_compatibility_matrix(),
+        kicad_range="10.0.x",
+        version_result=version,
+        native_step={"ok": True},
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "divergence"
+    report = json.loads(
+        (artifacts / "reports" / "semantic-differential-connectivity.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert report["match_count"] == 0
+    assert report["divergence_count"] == 1
+
+
+def test_connectivity_differential_native_export_failure_is_unavailable_authority(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    artifacts, version = _write_connectivity_differential_inputs(tmp_path)
+    monkeypatch.setattr(kicad_canary, "_source_sha", lambda: "a" * 40)
+    monkeypatch.setattr(
+        kicad_canary,
+        "_custom_connectivity_groups",
+        lambda _schematic: [
+            {
+                "names": ["EN"],
+                "pins": [
+                    {"reference": "U1", "pin": "2"},
+                    {"reference": "C1", "pin": "1"},
+                ],
+            }
+        ],
+    )
+
+    result = kicad_canary._run_connectivity_differential(
+        artifacts=artifacts,
+        compatibility=_compatibility_matrix(),
+        kicad_range="10.0.x",
+        version_result=version,
+        native_step={"ok": False, "error": "native export failed"},
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "unavailable-authority"
+    report = json.loads(
+        (artifacts / "reports" / "semantic-differential-connectivity.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert report["unavailable_authority_count"] == 1
+    assert report["infrastructure_invalid_count"] == 0
+    record = report["results"][0]
+    assert "native_result_hash" not in record
+    assert record["custom_result_hash"].startswith("sha256:")
+
+
+def test_connectivity_differential_parser_failure_is_infrastructure_invalid(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    artifacts, version = _write_connectivity_differential_inputs(tmp_path)
+    monkeypatch.setattr(kicad_canary, "_source_sha", lambda: "a" * 40)
+    monkeypatch.setattr(
+        kicad_canary,
+        "_custom_connectivity_groups",
+        lambda _schematic: (_ for _ in ()).throw(ValueError("parse failed")),
+    )
+
+    result = kicad_canary._run_connectivity_differential(
+        artifacts=artifacts,
+        compatibility=_compatibility_matrix(),
+        kicad_range="10.0.x",
+        version_result=version,
+        native_step={"ok": True},
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "infrastructure-invalid"
+    report = json.loads(
+        (artifacts / "reports" / "semantic-differential-connectivity.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert report["infrastructure_invalid_count"] == 1
+
+
+def test_connectivity_differential_report_keeps_preview_lane_attribution(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    artifacts, version = _write_connectivity_differential_inputs(tmp_path)
+    (artifacts / "logs" / "version.stdout.log").write_text("11.0.0\n", encoding="utf-8")
+    monkeypatch.setattr(kicad_canary, "_source_sha", lambda: "a" * 40)
+    monkeypatch.setattr(
+        kicad_canary,
+        "_custom_connectivity_groups",
+        lambda _schematic: [
+            {
+                "names": ["EN"],
+                "pins": [
+                    {"reference": "U1", "pin": "2"},
+                    {"reference": "C1", "pin": "1"},
+                ],
+            }
+        ],
+    )
+
+    result = kicad_canary._run_connectivity_differential(
+        artifacts=artifacts,
+        compatibility=_compatibility_matrix(),
+        kicad_range="11.0.x",
+        version_result=version,
+        native_step={"ok": True},
+    )
+
+    assert result["ok"] is True
+    report = json.loads(
+        (artifacts / "reports" / "semantic-differential-connectivity.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert report["lane"] == "preview"
+    assert report["kicad_version"] == "11.0.0"
+
+
+def test_differential_source_sha_prefers_explicit_head_sha(monkeypatch) -> None:
+    monkeypatch.setenv("KICAD_DIFFERENTIAL_SOURCE_SHA", "b" * 40)
+    monkeypatch.setenv("GITHUB_SHA", "c" * 40)
+
+    assert kicad_canary._source_sha() == "b" * 40
+
+
+def test_differential_source_sha_rejects_dirty_tracked_source_tree(monkeypatch) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def run(args: list[str], **kwargs: object):
+        calls.append(tuple(args))
+        if args[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout=" M scripts/kicad_canary.py\n", stderr=""
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="a" * 40 + "\n", stderr="")
+
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+    monkeypatch.setattr(kicad_canary.subprocess, "run", run)
+
+    with pytest.raises(RuntimeError, match="clean tracked source tree"):
+        kicad_canary._source_sha()
+    assert calls == [("git", "status", "--porcelain", "--untracked-files=no")]
