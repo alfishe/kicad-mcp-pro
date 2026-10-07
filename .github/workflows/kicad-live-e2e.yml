@@ -67,6 +67,7 @@ jobs:
           version-file: uv.toml
 
       - name: Install KiCad 10.0.x CLI
+        id: stable
         run: |
           set -euo pipefail
           sudo rm -f /etc/apt/sources.list.d/google-chrome.{list,sources}
@@ -74,11 +75,20 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends kicad kicad-libraries
           test "$(kicad-cli version)" = "10.0.6"
+          symbol_library_dir="$(
+            dpkg-query -L kicad-symbols |
+              awk '/\.kicad_sym$/ { sub(/\/[^/]+$/, "", $0); print; exit }'
+          )"
+          test -d "$symbol_library_dir"
+          echo "symbol_library_dir=$symbol_library_dir" >> "$GITHUB_OUTPUT"
 
       - name: Install Python dependencies
         run: uv sync --all-extras --frozen
 
       - name: Run KiCad 10.0.x canary
+        env:
+          KICAD_MCP_KICAD_CLI: /usr/bin/kicad-cli
+          KICAD_MCP_SYMBOL_LIBRARY_DIR: ${{ steps.stable.outputs.symbol_library_dir }}
         run: |
           set -euo pipefail
           uv run --all-extras python scripts/kicad_canary.py run \
@@ -131,6 +141,16 @@ jobs:
             exit 0
           }
 
+          symbol_library_dir="$(
+            dpkg-query -L kicad-nightly-symbols |
+              awk '/\.kicad_sym$/ { sub(/\/[^/]+$/, "", $0); print; exit }'
+          )"
+          if [ ! -d "$symbol_library_dir" ]; then
+            echo "available=false" >&3
+            echo "KiCad nightly symbol library directory is unavailable."
+            exit 0
+          fi
+
           for libdir in \
             /usr/lib/kicad-nightly/lib \
             /usr/lib/kicad-nightly/lib/x86_64-linux-gnu \
@@ -155,6 +175,7 @@ jobs:
               echo "available=true" >&3
               echo "kicad_cli=$candidate" >&3
               echo "kicad_range=$kicad_range" >&3
+              echo "symbol_library_dir=$symbol_library_dir" >&3
               echo "ld_library_path=${LD_LIBRARY_PATH:-}" >&3
               exit 0
             fi
@@ -171,6 +192,7 @@ jobs:
         env:
           KICAD_CANARY_KICAD_CLI: ${{ steps.nightly.outputs.kicad_cli }}
           KICAD_MCP_KICAD_CLI: ${{ steps.nightly.outputs.kicad_cli }}
+          KICAD_MCP_SYMBOL_LIBRARY_DIR: ${{ steps.nightly.outputs.symbol_library_dir }}
           LD_LIBRARY_PATH: ${{ steps.nightly.outputs.ld_library_path }}
         run: |
           set -euo pipefail
