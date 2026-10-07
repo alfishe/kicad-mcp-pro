@@ -14,7 +14,7 @@ from .command_queue import (
     get_command_queue,
     reset_command_queue,
 )
-from .discovery import KiCadIpcDiscovery, KiCadIpcEndpoint
+from .discovery import KiCadIpcDiscovery, KiCadIpcEndpoint, discover_socket_candidates
 from .errors import (
     KiCadIpcBusyError,
     KiCadIpcError,
@@ -31,6 +31,7 @@ __all__ = [
     "KiCadIpcBusyError",
     "KiCadIpcDiscovery",
     "KiCadIpcEndpoint",
+    "discover_socket_candidates",
     "KiCadIpcError",
     "KiCadIpcTimeoutError",
     "KiCadIpcUnavailableError",
