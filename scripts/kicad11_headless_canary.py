@@ -8,6 +8,7 @@ import inspect
 import json
 import os
 import re
+import shutil
 import subprocess
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from kicad_mcp.evals.roundtrip_differential import RoundTripSnapshot
+    from kicad_mcp.evals.semantic_differential import DifferentialResult
 
 try:
     from scripts.runtime_path_safety import approved_runtime_path
@@ -243,11 +245,7 @@ def _native_roundtrip_snapshot(board: object) -> RoundTripSnapshot:
     vias = list(typed_board.get_vias())
     zones = list(typed_board.get_zones())
     nets = list(typed_board.get_nets())
-    net_names = tuple(
-        name
-        for net in nets
-        if (name := str(getattr(net, "name", "")).strip())
-    )
+    net_names = tuple(name for net in nets if (name := str(getattr(net, "name", "")).strip()))
     return RoundTripSnapshot(
         footprint_count=len(footprints),
         track_count=len(tracks),
@@ -309,11 +307,7 @@ def _headless_roundtrip_probe(
     except ImportError as exc:
         return None, f"kicad-python is unavailable: {exc}"
 
-    output = (
-        artifacts
-        / "differential"
-        / f"native-roundtrip-{project_or_file.stem}.kicad_pcb"
-    )
+    output = artifacts / "differential" / f"native-roundtrip-{project_or_file.stem}.kicad_pcb"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.unlink(missing_ok=True)
     try:
@@ -349,8 +343,11 @@ def _headless_roundtrip_probe(
 
 
 def _source_sha() -> str:
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError("Could not resolve git executable for live identity differential")
     result = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+        [git, "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
         text=True,
         capture_output=True,
         check=False,
@@ -364,7 +361,7 @@ def _source_sha() -> str:
 def _persist_differential_result(
     *,
     artifacts: Path,
-    result: Any,
+    result: DifferentialResult,
     operation: str,
     filename: str,
 ) -> None:
@@ -466,6 +463,7 @@ def _write_roundtrip_differential(
         classify_roundtrip_differential,
         hash_roundtrip_fixture,
     )
+
     result = classify_roundtrip_differential(
         source_sha=_source_sha(),
         lane="preview",
