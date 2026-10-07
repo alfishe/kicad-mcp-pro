@@ -162,13 +162,30 @@ class HeadlessServerSession:
 
         return self._socket_path
 
-    def health(self) -> dict[str, object]:
-        """Probe the session over IPC; raises KiCadIpcUnavailableError if dead."""
+    def health(
+        self,
+        *,
+        retries: int = 20,
+        retry_delay: float = 0.25,
+    ) -> dict[str, object]:
+        """Probe the session over IPC; raises KiCadIpcUnavailableError if dead.
+
+        Retries transient failures (the server answers "not ready to reply"
+        while it is still preloading documents after the socket appears).
+        """
         if not self.running or self._socket_path is None:
-            raise KiCadIpcUnavailableError(
-                f"session {self._name!r} is not running"
-            )
-        return self._health_prober(self._socket_path)
+            raise KiCadIpcUnavailableError(f"session {self._name!r} is not running")
+
+        last_error: Exception | None = None
+        for attempt in range(max(1, retries)):
+            try:
+                return self._health_prober(self._socket_path)
+            except KiCadIpcUnavailableError as exc:
+                last_error = exc
+                time.sleep(retry_delay)
+        raise KiCadIpcUnavailableError(
+            f"session {self._name!r} did not become healthy: {last_error}"
+        )
 
     def stop(self) -> bool:
         """Terminate the server; returns True when it exited within the budget."""

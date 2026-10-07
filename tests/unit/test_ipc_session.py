@@ -167,6 +167,28 @@ def test_session_manager_registry(tmp_path: Path) -> None:
     assert manager.names == []
 
 
+def test_health_retries_transient_failures(tmp_path: Path) -> None:
+    script = _write_script(tmp_path, "fake-server", FAKE_SERVER)
+    calls = {"n": 0}
+
+    def flaky_prober(path: Path) -> dict[str, object]:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise KiCadIpcUnavailableError("KiCad is not ready to reply")
+        return {"connected": True}
+
+    session = HeadlessServerSession(
+        _config(tmp_path, script), name="flaky", health_prober=flaky_prober
+    )
+    session.start()
+    try:
+        report = session.health(retries=5, retry_delay=0.01)
+        assert report["connected"] is True
+        assert calls["n"] == 3
+    finally:
+        session.stop()
+
+
 def test_context_manager_stops_on_exit(tmp_path: Path) -> None:
     script = _write_script(tmp_path, "fake-server", FAKE_SERVER)
     session = HeadlessServerSession(_config(tmp_path, script), name="ctx")
