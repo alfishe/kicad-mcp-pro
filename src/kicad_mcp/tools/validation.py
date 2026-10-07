@@ -3906,3 +3906,49 @@ def register(mcp: FastMCP) -> None:
             )
         ),
     )
+
+    _register_verify_board_tool(mcp)
+
+
+def _register_verify_board_tool(mcp: FastMCP) -> None:
+    """Register the combined DRC+ERC verification verdict tool (ROADMAP M0 P0)."""
+    from ..validation.verify_board import compose_board_verdict, summarize_check
+
+    @mcp.tool()
+    @headless_compatible
+    def verify_board() -> str:
+        """Run PCB DRC and schematic ERC, returning one combined PASS/WARN/FAIL verdict.
+
+        Returns per-check error/warning counts, an unconnected-connections count,
+        sample violations, and concrete next actions. A check that cannot run
+        (missing files, malformed report) blocks the verdict as FAIL.
+        """
+        checks = []
+
+        drc_path, drc_report, drc_error = _run_drc_report("verify_board_drc.json")
+        if drc_error is not None:
+            drc_status = (
+                "malformed" if drc_error.startswith("Malformed DRC report:") else "unavailable"
+            )
+            checks.append(
+                summarize_check("pcb_drc", status=drc_status, report=None, error=drc_error)
+            )
+        else:
+            checks.append(
+                summarize_check(
+                    "pcb_drc",
+                    status="clean",
+                    report=drc_report,
+                    unconnected_key="unconnected_items",
+                )
+            )
+
+        _erc_path, erc_report, erc_error = _run_erc_report("verify_board_erc.json")
+        if erc_error is not None:
+            checks.append(
+                summarize_check("sch_erc", status="unavailable", report=None, error=erc_error)
+            )
+        else:
+            checks.append(summarize_check("sch_erc", status="clean", report=erc_report))
+
+        return json.dumps(compose_board_verdict(checks), indent=2)
