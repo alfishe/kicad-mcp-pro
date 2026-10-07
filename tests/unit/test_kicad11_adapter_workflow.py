@@ -50,8 +50,8 @@ def test_kicad_live_e2e_records_exact_differential_source_sha() -> None:
 def test_kicad_live_e2e_installs_connectivity_symbol_libraries() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "kicad kicad-libraries" in workflow
-    assert "kicad-nightly kicad-nightly-libraries" in workflow
+    assert "kicad kicad-symbols" in workflow
+    assert "kicad-nightly kicad-nightly-symbols" in workflow
     assert "dpkg-query -L kicad-symbols" in workflow
     assert "dpkg-query -L kicad-nightly-symbols" in workflow
     assert "KICAD_MCP_KICAD_CLI: /usr/bin/kicad-cli" in workflow
