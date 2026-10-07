@@ -371,7 +371,7 @@
           "toolCount": 8
         },
         "project": {
-          "availableCount": 31,
+          "availableCount": 33,
           "blockedCount": 0,
           "canarySurfaces": [
             "read"
@@ -385,9 +385,9 @@
           ],
           "selectedBackends": {
             "local-engine": 15,
-            "local-filesystem": 16
+            "local-filesystem": 18
           },
-          "toolCount": 31
+          "toolCount": 33
         },
         "release_export": {
           "availableCount": 0,
@@ -696,7 +696,7 @@
           "toolCount": 8
         },
         "project": {
-          "availableCount": 31,
+          "availableCount": 33,
           "blockedCount": 0,
           "canarySurfaces": [
             "read"
@@ -710,9 +710,9 @@
           ],
           "selectedBackends": {
             "local-engine": 15,
-            "local-filesystem": 16
+            "local-filesystem": 18
           },
-          "toolCount": 31
+          "toolCount": 33
         },
         "release_export": {
           "availableCount": 2,
@@ -1021,7 +1021,7 @@
           "toolCount": 8
         },
         "project": {
-          "availableCount": 31,
+          "availableCount": 33,
           "blockedCount": 0,
           "canarySurfaces": [
             "read"
@@ -1035,9 +1035,9 @@
           ],
           "selectedBackends": {
             "local-engine": 15,
-            "local-filesystem": 16
+            "local-filesystem": 18
           },
-          "toolCount": 31
+          "toolCount": 33
         },
         "release_export": {
           "availableCount": 2,
@@ -1199,7 +1199,7 @@
     "previewBaseline": "11.x",
     "publicSupportClaim": "KiCad 11 remains preview until native canaries pass.",
     "stableBaseline": "10.0.x",
-    "toolCount": 388
+    "toolCount": 390
   },
   "tools": [
     {
@@ -1224,6 +1224,54 @@
       "runtime": "kicad_ipc",
       "tier": "write",
       "tool": "add_footprint_inner_layer_graphic",
+      "writesFiles": true
+    },
+    {
+      "category": "project",
+      "routes": {
+        "degradedNoKiCad": {
+          "available": true,
+          "backend": "local-filesystem",
+          "mutationGuard": "atomic-write-validation"
+        },
+        "kicad10Gui": {
+          "available": true,
+          "backend": "local-filesystem",
+          "mutationGuard": "atomic-write-validation"
+        },
+        "kicad11Headless": {
+          "available": true,
+          "backend": "local-filesystem",
+          "mutationGuard": "atomic-write-validation"
+        }
+      },
+      "runtime": "none",
+      "tier": "write",
+      "tool": "audit_replay",
+      "writesFiles": true
+    },
+    {
+      "category": "project",
+      "routes": {
+        "degradedNoKiCad": {
+          "available": true,
+          "backend": "local-filesystem",
+          "mutationGuard": "atomic-write-validation"
+        },
+        "kicad10Gui": {
+          "available": true,
+          "backend": "local-filesystem",
+          "mutationGuard": "atomic-write-validation"
+        },
+        "kicad11Headless": {
+          "available": true,
+          "backend": "local-filesystem",
+          "mutationGuard": "atomic-write-validation"
+        }
+      },
+      "runtime": "none",
+      "tier": "write",
+      "tool": "audit_tail",
       "writesFiles": true
     },
     {

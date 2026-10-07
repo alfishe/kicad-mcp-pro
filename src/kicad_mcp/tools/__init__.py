@@ -1,6 +1,7 @@
 """Tool modules."""
 
 __all__ = [
+    "audit_tools",
     "dfm",
     "embedded_files",
     "emc_compliance",

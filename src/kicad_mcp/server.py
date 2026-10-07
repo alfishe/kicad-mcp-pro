@@ -96,6 +96,7 @@ from .operating_modes import (
     filter_tools_for_mode,
     is_tool_allowed_in_mode,
 )
+from .audit import wrap_tool_audit
 from .tools import footprint as _footprint
 from .tools import jobset as _jobset
 from .tools import router
@@ -905,6 +906,8 @@ class KiCadFastMCP(FastMCP):
                     return await anyio.to_thread.run_sync(call)
 
                 registered_func = run_sync_tool_in_worker
+
+            registered_func = wrap_tool_audit(name or func.__name__, registered_func)
 
             published_meta = dict(meta or {})
             tool_metadata = get_tool_metadata(name or func.__name__)
@@ -1834,6 +1837,7 @@ def _register_profile_components(
     from .prompts import workflows
     from .resources import analysis, board_state, server_info, studio_context
     from .tools import (
+        audit_tools,
         capability_parity,
         dfm,
         embedded_files,
@@ -1863,6 +1867,7 @@ def _register_profile_components(
     validate_callable_imports()
 
     router.register(server)
+    audit_tools.register(server)
     project.register(server)
     capability_parity.register(server)
     embedded_files.register(server)

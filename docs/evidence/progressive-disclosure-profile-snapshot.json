@@ -93,11 +93,11 @@
       ]
     },
     "expert": {
-      "callableTools": 388,
-      "catalogCharacters": 227987,
+      "callableTools": 390,
+      "catalogCharacters": 229004,
       "catalogReductionVsExpertPct": 0.0,
-      "declaredTools": 388,
-      "estimatedCatalogTokens": 56997,
+      "declaredTools": 390,
+      "estimatedCatalogTokens": 57251,
       "forbiddenToolExposures": 8,
       "goldenCases": 65,
       "goldenCasesCovered": 55,
@@ -113,6 +113,8 @@
       "toolReductionVsExpertPct": 0.0,
       "tools": [
         "add_footprint_inner_layer_graphic",
+        "audit_replay",
+        "audit_tail",
         "check_design_for_manufacture",
         "check_power_integrity",
         "dfm_calculate_manufacturing_cost",
@@ -505,7 +507,7 @@
     "release": {
       "callableTools": 24,
       "catalogCharacters": 7184,
-      "catalogReductionVsExpertPct": 96.8,
+      "catalogReductionVsExpertPct": 96.9,
       "declaredTools": 24,
       "estimatedCatalogTokens": 1796,
       "forbiddenToolExposures": 0,

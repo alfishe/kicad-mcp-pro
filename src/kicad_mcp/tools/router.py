@@ -127,6 +127,8 @@ TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "project": {
         "description": "Project setup, server discovery, and quick help.",
         "tools": [
+            "audit_replay",
+            "audit_tail",
             "kicad_set_project",
             "kicad_get_project_info",
             "project_design_workflow",
