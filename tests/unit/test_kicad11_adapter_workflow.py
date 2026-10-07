@@ -52,7 +52,12 @@ def test_kicad_live_e2e_installs_connectivity_symbol_libraries() -> None:
 
     assert "kicad kicad-libraries" in workflow
     assert "kicad-nightly kicad-nightly-libraries" in workflow
+    assert "dpkg-query -L kicad-symbols" in workflow
+    assert "dpkg-query -L kicad-nightly-symbols" in workflow
+    assert "KICAD_MCP_KICAD_CLI: /usr/bin/kicad-cli" in workflow
     assert "KICAD_MCP_KICAD_CLI: ${{ steps.nightly.outputs.kicad_cli }}" in workflow
+    assert "KICAD_MCP_SYMBOL_LIBRARY_DIR: ${{ steps.stable.outputs.symbol_library_dir }}" in workflow
+    assert "KICAD_MCP_SYMBOL_LIBRARY_DIR: ${{ steps.nightly.outputs.symbol_library_dir }}" in workflow
 
 
 def test_kicad_live_e2e_tracks_shared_fixture_corpus() -> None:
