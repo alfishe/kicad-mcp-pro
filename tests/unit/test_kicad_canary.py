@@ -431,6 +431,36 @@ def test_version_range_rejects_wrong_minor_for_minor_pinned_range(tmp_path: Path
     assert "10.0.x" in error
 
 
+def test_run_canary_clears_stale_manufacturing_outputs_before_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = Path(sys.executable)
+    script = tmp_path / "version_kicad_cli.py"
+    script.write_text("print('KiCad 10.0.6')\n", encoding="utf-8")
+    artifacts = tmp_path / "artifacts"
+    manufacturing = artifacts / "manufacturing"
+    manufacturing.mkdir(parents=True)
+    (manufacturing / "stale.gbr").write_text("stale", encoding="utf-8")
+    reports = artifacts / "reports"
+    reports.mkdir()
+    (reports / "keep.txt").write_text("keep", encoding="utf-8")
+
+    monkeypatch.setattr(kicad_canary, "_resolve_cli", lambda: cli)
+    monkeypatch.setattr(kicad_canary, "_read_compatibility_matrix", _compatibility_matrix)
+
+    def command_plan(
+        _artifacts: Path, _compatibility: dict[str, object], _kicad_range: str
+    ) -> list[CanaryStep]:
+        assert not manufacturing.exists()
+        return [CanaryStep(name="version", fixture="compatibility", args=(str(script),))]
+
+    monkeypatch.setattr(kicad_canary, "_command_plan", command_plan)
+
+    assert kicad_canary.run_canary(artifacts, "10.0.x") == 0
+    assert not manufacturing.exists()
+    assert (reports / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+
 def test_run_canary_writes_summary_when_version_range_fails(tmp_path: Path, monkeypatch) -> None:
     cli = Path(sys.executable)
     script = tmp_path / "version_kicad_cli.py"
@@ -898,3 +928,97 @@ def test_drc_differential_failed_native_step_is_unavailable_even_with_artifact(
     assert records[0].status == "unavailable-authority"
     assert records[0].native_result_hash is None
     assert records[0].native_pass is None
+
+
+def _write_export_inventory_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    artifacts = tmp_path / "artifacts"
+    gerbers = artifacts / "manufacturing" / "gerbers"
+    drill = artifacts / "manufacturing" / "drill"
+    gerbers.mkdir(parents=True)
+    drill.mkdir(parents=True)
+    for name in ("demo-F_Cu.gtl", "demo-B_Cu.gbl", "demo-Edge_Cuts.gm1", "demo-job.gbrjob"):
+        (gerbers / name).write_text(name, encoding="utf-8")
+    (drill / "demo.drl").write_text("drill", encoding="utf-8")
+    (artifacts / "manufacturing" / "board.ipc2581").write_text("ipc", encoding="utf-8")
+    fixture = artifacts / "workspace" / "clean-led-kicad10" / "demo.kicad_pcb"
+    fixture.parent.mkdir(parents=True)
+    fixture.write_text("(kicad_pcb demo)\n", encoding="utf-8")
+    return artifacts, fixture
+
+
+def _manufacturing_steps(*, ok: bool = True) -> list[dict[str, object]]:
+    return [
+        {"name": "gerbers", "fixture": "clean-led-kicad10", "ok": ok},
+        {"name": "drill", "fixture": "clean-led-kicad10", "ok": ok},
+        {"name": "ipc2581", "fixture": "clean-led-kicad10", "ok": ok},
+    ]
+
+
+def test_export_inventory_differential_matches_stable_native_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifacts, fixture = _write_export_inventory_inputs(tmp_path)
+    monkeypatch.setattr(kicad_canary, "_source_sha", lambda: "a" * 40)
+
+    result = kicad_canary._write_export_inventory_differential_result(
+        artifacts=artifacts,
+        kicad_range="10.0.x",
+        kicad_version="10.0.6",
+        fixture_id="clean-led-kicad10",
+        fixture=fixture,
+        native_steps=_manufacturing_steps(),
+    )
+
+    assert result is not None
+    assert result.status == "match"
+    assert result.lane == "stable"
+    assert result.operation == "export.manufacturing-inventory"
+
+
+def test_export_inventory_differential_follows_native_export_feature_gate() -> None:
+    compatibility = _compatibility_matrix()
+
+    assert kicad_canary._export_inventory_differential_enabled(compatibility, "10.0.x")
+    assert not kicad_canary._export_inventory_differential_enabled(compatibility, "11.0.x")
+    assert not kicad_canary._export_inventory_differential_enabled(compatibility, "9.x")
+
+
+def test_export_inventory_failed_native_step_is_unavailable_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifacts, fixture = _write_export_inventory_inputs(tmp_path)
+    monkeypatch.setattr(kicad_canary, "_source_sha", lambda: "a" * 40)
+    steps = _manufacturing_steps()
+    steps[1]["ok"] = False
+
+    result = kicad_canary._write_export_inventory_differential_result(
+        artifacts=artifacts,
+        kicad_range="10.0.x",
+        kicad_version="10.0.6",
+        fixture_id="clean-led-kicad10",
+        fixture=fixture,
+        native_steps=steps,
+    )
+
+    assert result is not None
+    assert result.status == "unavailable-authority"
+    assert result.native_result_hash is None
+    assert result.custom_result_hash is None
+
+
+def test_export_inventory_differential_ignores_unsupported_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifacts, fixture = _write_export_inventory_inputs(tmp_path)
+    monkeypatch.setattr(kicad_canary, "_source_sha", lambda: "a" * 40)
+
+    result = kicad_canary._write_export_inventory_differential_result(
+        artifacts=artifacts,
+        kicad_range="9.x",
+        kicad_version="9.0.7",
+        fixture_id="clean-led-kicad10",
+        fixture=fixture,
+        native_steps=_manufacturing_steps(),
+    )
+
+    assert result is None

@@ -24,6 +24,7 @@ from kicad_mcp.evals.connectivity_differential import (
     normalize_custom_connectivity_groups,
 )
 from kicad_mcp.evals.drc_differential import compare_drc_report_file
+from kicad_mcp.evals.export_inventory_differential import classify_export_inventory_differential
 from kicad_mcp.evals.geometry_differential import classify_geometry_differential
 from kicad_mcp.evals.semantic_differential import (
     DifferentialLane,
@@ -52,6 +53,7 @@ CONNECTIVITY_DIFFERENTIAL_FIXTURE_DIR = (
 CONNECTIVITY_DIFFERENTIAL_FIXTURE_NAME = "esp32-c3-wroom-02-breakout.kicad_sch"
 CONNECTIVITY_DIFFERENTIAL_FIXTURE_ID = "gallery-esp32-c3-wroom-02-breakout"
 GEOMETRY_DIFFERENTIAL_FIXTURE_ID = "clean-led-kicad10"
+EXPORT_INVENTORY_DIFFERENTIAL_FIXTURE_ID = "clean-led-kicad10"
 
 INSTALLERS = {
     "10.0.x": {
@@ -814,6 +816,13 @@ def _write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _reset_manufacturing_outputs(artifacts: Path) -> None:
+    """Remove prior canary-owned manufacturing outputs before native export authority runs."""
+    manufacturing = approved_runtime_path(artifacts / "manufacturing")
+    if manufacturing.exists():
+        shutil.rmtree(manufacturing)
+
+
 def _subprocess_output_text(value: object) -> str:
     if value is None:
         return ""
@@ -1131,12 +1140,52 @@ def _write_drc_differential_results(
                 lane=lane,
                 kicad_version=kicad_version,
                 fixture_id=fixture_id,
-                native_authority_available=(
-                    bool(step.get("ok")) and not bool(step.get("skipped"))
-                ),
+                native_authority_available=(bool(step.get("ok")) and not bool(step.get("skipped"))),
             )
         )
     return records
+
+
+def _export_inventory_differential_enabled(
+    compatibility: dict[str, Any],
+    kicad_range: str,
+) -> bool:
+    """Return whether this lane has both differential attribution and native export authority."""
+    return _differential_lane_for_range(kicad_range) is not None and supports_feature_gate(
+        compatibility, "manufacturingExports", kicad_range
+    )
+
+
+def _write_export_inventory_differential_result(
+    *,
+    artifacts: Path,
+    kicad_range: str,
+    kicad_version: str,
+    fixture_id: str,
+    fixture: Path,
+    native_steps: list[dict[str, object]],
+) -> DifferentialResult | None:
+    lane = _differential_lane_for_range(kicad_range)
+    if lane is None:
+        return None
+
+    required_steps = {"gerbers", "drill", "ipc2581"}
+    by_name = {str(step.get("name", "")): step for step in native_steps}
+    authority_available = all(
+        name in by_name and bool(by_name[name].get("ok")) and not bool(by_name[name].get("skipped"))
+        for name in required_steps
+    )
+    return classify_export_inventory_differential(
+        source_sha=_source_sha(),
+        lane=lane,
+        kicad_version=kicad_version,
+        fixture_id=fixture_id,
+        fixture_hash=_fixture_hash(fixture),
+        gerber_dir=artifacts / "manufacturing" / "gerbers",
+        drill_dir=artifacts / "manufacturing" / "drill",
+        ipc2581_path=artifacts / "manufacturing" / "board.ipc2581",
+        authority_available=authority_available,
+    )
 
 
 def _write_geometry_differential_result(
@@ -1256,6 +1305,7 @@ def run_canary(artifacts: Path, kicad_range: str) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
+    _reset_manufacturing_outputs(artifacts)
     steps = _command_plan(artifacts, compatibility, kicad_range)
     results = [_run_step(cli, step, artifacts) for step in steps]
     version = next(result for result in results if result["name"] == "version")
@@ -1311,9 +1361,7 @@ def run_canary(artifacts: Path, kicad_range: str) -> int:
         if geometry_result is not None:
             differential_results.append(geometry_result)
 
-    drc_steps = [
-        result for result in results if result.get("name") in {"clean-drc", "dirty-drc"}
-    ]
+    drc_steps = [result for result in results if result.get("name") in {"clean-drc", "dirty-drc"}]
     if kicad_version is not None and version_error is None and drc_steps:
         differential_results.extend(
             _write_drc_differential_results(
@@ -1323,6 +1371,28 @@ def run_canary(artifacts: Path, kicad_range: str) -> int:
                 native_steps=drc_steps,
             )
         )
+
+    manufacturing_steps = [
+        result for result in results if result.get("name") in {"gerbers", "drill", "ipc2581"}
+    ]
+    if (
+        kicad_version is not None
+        and version_error is None
+        and manufacturing_steps
+        and _export_inventory_differential_enabled(compatibility, kicad_range)
+    ):
+        export_inventory_result = _write_export_inventory_differential_result(
+            artifacts=artifacts,
+            kicad_range=kicad_range,
+            kicad_version=kicad_version,
+            fixture_id=EXPORT_INVENTORY_DIFFERENTIAL_FIXTURE_ID,
+            fixture=_fixture_file(
+                artifacts / "workspace", EXPORT_INVENTORY_DIFFERENTIAL_FIXTURE_ID, ".kicad_pcb"
+            ),
+            native_steps=manufacturing_steps,
+        )
+        if export_inventory_result is not None:
+            differential_results.append(export_inventory_result)
 
     if differential_results:
         _write_differential_summary(artifacts, differential_results)
