@@ -132,9 +132,7 @@ def test_canary_reports_read_write_and_export_separately(
         assert payload["status"] == "passed"
         assert payload["kicadVersion"] == "11.0.0"
 
-    assert (
-        artifacts / "differential" / "native-roundtrip-demo.kicad_pcb"
-    ).is_file()
+    assert (artifacts / "differential" / "native-roundtrip-demo.kicad_pcb").is_file()
 
 
 def test_canary_writes_blocked_reports_when_nightly_is_unavailable(tmp_path: Path) -> None:
