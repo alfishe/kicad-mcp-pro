@@ -518,7 +518,8 @@
         "vcs_init_git",
         "vcs_list_checkpoints",
         "vcs_restore_checkpoint",
-        "vcs_tag_release"
+        "vcs_tag_release",
+        "verify_board"
       ]
     },
     "readonly": {
@@ -778,7 +779,8 @@
         "variant_get_component_status",
         "variant_list",
         "variant_set_active",
-        "variant_set_component_override"
+        "variant_set_component_override",
+        "verify_board"
       ]
     },
     "pcb_layout": {
@@ -1037,7 +1039,8 @@
         "sym_export_svg",
         "sym_upgrade",
         "validate_design",
-        "validate_footprints_vs_schematic"
+        "validate_footprints_vs_schematic",
+        "verify_board"
       ]
     },
     "simulation": {
@@ -1567,7 +1570,8 @@
         "vcs_init_git",
         "vcs_list_checkpoints",
         "vcs_restore_checkpoint",
-        "vcs_tag_release"
+        "vcs_tag_release",
+        "verify_board"
       ]
     },
     "full_write": {
@@ -1962,7 +1966,8 @@
         "vcs_init_git",
         "vcs_list_checkpoints",
         "vcs_restore_checkpoint",
-        "vcs_tag_release"
+        "vcs_tag_release",
+        "verify_board"
       ]
     }
   }
