@@ -463,6 +463,7 @@ TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "validation": {
         "description": "Design validation, DFM checks, and rule inspection.",
         "tools": [
+            "verify_board",
             "schematic_quality_gate",
             "schematic_connectivity_gate",
             "schematic_design_rule_check",
