@@ -8,6 +8,11 @@ on:
     paths:
       - "scripts/kicad_canary.py"
       - "scripts/kicad11_headless_canary.py"
+      - "src/kicad_mcp/evals/semantic_differential.py"
+      - "src/kicad_mcp/evals/connectivity_differential.py"
+      - "src/kicad_mcp/tools/schematic.py"
+      - "src/kicad_mcp/tools/schematic_transfer.py"
+      - "examples/gallery/esp32-c3-wroom-02-breakout/**"
       - "scripts/build_adapter_matrix.py"
       - "src/kicad_mcp/adapter_matrix.py"
       - "src/kicad_mcp/ipc/**"
@@ -24,6 +29,11 @@ on:
     paths:
       - "scripts/kicad_canary.py"
       - "scripts/kicad11_headless_canary.py"
+      - "src/kicad_mcp/evals/semantic_differential.py"
+      - "src/kicad_mcp/evals/connectivity_differential.py"
+      - "src/kicad_mcp/tools/schematic.py"
+      - "src/kicad_mcp/tools/schematic_transfer.py"
+      - "examples/gallery/esp32-c3-wroom-02-breakout/**"
       - "scripts/build_adapter_matrix.py"
       - "src/kicad_mcp/adapter_matrix.py"
       - "src/kicad_mcp/ipc/**"
@@ -65,8 +75,11 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.{list,sources}
           sudo add-apt-repository -y ppa:kicad/kicad-10.0-releases
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends kicad
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            kicad \
+            kicad-symbols
           test "$(kicad-cli version)" = "10.0.6"
+          test -f /usr/share/kicad/symbols/Device.kicad_sym
 
       - name: Install Python dependencies
         run: uv sync --all-extras --frozen
