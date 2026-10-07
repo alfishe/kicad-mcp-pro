@@ -47,6 +47,14 @@ def test_kicad_live_e2e_records_exact_differential_source_sha() -> None:
     assert "github.event.pull_request.head.sha || github.sha" in workflow
 
 
+def test_kicad_live_e2e_installs_connectivity_symbol_libraries() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "kicad kicad-libraries" in workflow
+    assert "kicad-nightly kicad-nightly-libraries" in workflow
+    assert "KICAD_MCP_KICAD_CLI: ${{ steps.nightly.outputs.kicad_cli }}" in workflow
+
+
 def test_kicad_live_e2e_tracks_shared_fixture_corpus() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
