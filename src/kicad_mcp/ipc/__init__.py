@@ -1,4 +1,4 @@
-"""KiCad IPC client, discovery, and capability helpers."""
+"""KiCad IPC client, discovery, session, and capability helpers."""
 
 from .capabilities import (
     REQUIRED_LIVE_EDITING_TOOLS,
@@ -21,9 +21,17 @@ from .errors import (
     KiCadIpcTimeoutError,
     KiCadIpcUnavailableError,
 )
+from .session import (
+    HeadlessServerSession,
+    SessionConfig,
+    SessionManager,
+    get_session_manager,
+    reset_session_manager,
+)
 
 __all__ = [
     "REQUIRED_LIVE_EDITING_TOOLS",
+    "HeadlessServerSession",
     "JournalEntry",
     "KiCadCommandQueue",
     "KiCadIpcCapabilityState",
@@ -31,13 +39,17 @@ __all__ = [
     "KiCadIpcBusyError",
     "KiCadIpcDiscovery",
     "KiCadIpcEndpoint",
-    "discover_socket_candidates",
     "KiCadIpcError",
     "KiCadIpcTimeoutError",
     "KiCadIpcUnavailableError",
     "RetryClass",
+    "SessionConfig",
+    "SessionManager",
     "classify_error",
+    "discover_socket_candidates",
     "get_command_queue",
     "get_ipc_capability_state",
+    "get_session_manager",
     "reset_command_queue",
+    "reset_session_manager",
 ]
