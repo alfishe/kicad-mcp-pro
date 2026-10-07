@@ -489,7 +489,7 @@
           "toolCount": 11
         },
         "validation": {
-          "availableCount": 35,
+          "availableCount": 36,
           "blockedCount": 3,
           "canarySurfaces": [
             "read",
@@ -504,10 +504,10 @@
           ],
           "selectedBackends": {
             "local-engine": 10,
-            "local-filesystem": 25,
+            "local-filesystem": 26,
             "unavailable": 3
           },
-          "toolCount": 38
+          "toolCount": 39
         },
         "version_control": {
           "availableCount": 6,
@@ -814,7 +814,7 @@
           "toolCount": 11
         },
         "validation": {
-          "availableCount": 38,
+          "availableCount": 39,
           "blockedCount": 0,
           "canarySurfaces": [
             "read",
@@ -830,9 +830,9 @@
           "selectedBackends": {
             "kicad-cli": 3,
             "local-engine": 10,
-            "local-filesystem": 25
+            "local-filesystem": 26
           },
-          "toolCount": 38
+          "toolCount": 39
         },
         "version_control": {
           "availableCount": 6,
@@ -1139,7 +1139,7 @@
           "toolCount": 11
         },
         "validation": {
-          "availableCount": 38,
+          "availableCount": 39,
           "blockedCount": 0,
           "canarySurfaces": [
             "read",
@@ -1155,9 +1155,9 @@
           "selectedBackends": {
             "kicad-cli": 3,
             "local-engine": 10,
-            "local-filesystem": 25
+            "local-filesystem": 26
           },
-          "toolCount": 38
+          "toolCount": 39
         },
         "version_control": {
           "availableCount": 6,
@@ -1199,7 +1199,7 @@
     "previewBaseline": "11.x",
     "publicSupportClaim": "KiCad 11 remains preview until native canaries pass.",
     "stableBaseline": "10.0.x",
-    "toolCount": 387
+    "toolCount": 388
   },
   "tools": [
     {
@@ -10488,6 +10488,30 @@
       "runtime": "none",
       "tier": "publish",
       "tool": "vcs_tag_release",
+      "writesFiles": true
+    },
+    {
+      "category": "validation",
+      "routes": {
+        "degradedNoKiCad": {
+          "available": true,
+          "backend": "local-filesystem",
+          "mutationGuard": "atomic-write-validation"
+        },
+        "kicad10Gui": {
+          "available": true,
+          "backend": "local-filesystem",
+          "mutationGuard": "atomic-write-validation"
+        },
+        "kicad11Headless": {
+          "available": true,
+          "backend": "local-filesystem",
+          "mutationGuard": "atomic-write-validation"
+        }
+      },
+      "runtime": "none",
+      "tier": "write",
+      "tool": "verify_board",
       "writesFiles": true
     }
   ]

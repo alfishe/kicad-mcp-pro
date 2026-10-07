@@ -93,11 +93,11 @@
       ]
     },
     "expert": {
-      "callableTools": 387,
-      "catalogCharacters": 227578,
+      "callableTools": 388,
+      "catalogCharacters": 227987,
       "catalogReductionVsExpertPct": 0.0,
-      "declaredTools": 387,
-      "estimatedCatalogTokens": 56895,
+      "declaredTools": 388,
+      "estimatedCatalogTokens": 56997,
       "forbiddenToolExposures": 8,
       "goldenCases": 65,
       "goldenCasesCovered": 55,
@@ -498,7 +498,8 @@
         "vcs_init_git",
         "vcs_list_checkpoints",
         "vcs_restore_checkpoint",
-        "vcs_tag_release"
+        "vcs_tag_release",
+        "verify_board"
       ]
     },
     "release": {
