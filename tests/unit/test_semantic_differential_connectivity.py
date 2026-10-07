@@ -71,6 +71,33 @@ def test_native_and_custom_connectivity_normalize_net_identity_and_pin_membershi
     assert connectivity_signature_hash(native) == connectivity_signature_hash(custom)
 
 
+def test_native_connectivity_node_attributes_are_order_independent() -> None:
+    reordered = NATIVE_NETLIST.replace(
+        '(node (ref "C1") (pin "1") (pintype "passive"))',
+        '(node (pin "1") (pintype "passive") (ref "C1"))',
+    ).replace(
+        '(node (ref "U1") (pin "2") (pinfunction "EN") (pintype "input"))',
+        '(node (pintype "input") (pin "2") (ref "U1") (pinfunction "EN"))',
+    )
+
+    assert normalize_native_connectivity(reordered) == normalize_native_connectivity(NATIVE_NETLIST)
+
+
+def test_native_connectivity_rejects_node_missing_unique_ref_or_pin() -> None:
+    missing_pin = NATIVE_NETLIST.replace(
+        '(node (ref "C1") (pin "1") (pintype "passive"))',
+        '(node (ref "C1") (pintype "passive"))',
+    )
+    duplicate_ref = NATIVE_NETLIST.replace(
+        '(node (ref "C1") (pin "1") (pintype "passive"))',
+        '(node (ref "C1") (pin "1") (ref "C1") (pintype "passive"))',
+    )
+
+    for text in (missing_pin, duplicate_ref):
+        with pytest.raises(ValueError, match="exactly one ref and pin"):
+            normalize_native_connectivity(text)
+
+
 def test_connectivity_classifier_detects_seeded_membership_divergence() -> None:
     divergent_groups = [
         CUSTOM_GROUPS[0],

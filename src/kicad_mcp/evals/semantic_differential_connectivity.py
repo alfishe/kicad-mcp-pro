@@ -26,10 +26,8 @@ ConnectivityNet = tuple[str | None, ConnectivityGroup]
 ConnectivitySignature = tuple[ConnectivityNet, ...]
 
 _QUOTED_VALUE = r'"((?:\\.|[^"\\])*)"'
-_NODE_PATTERN = re.compile(
-    rf"\(node\s+\(ref\s+{_QUOTED_VALUE}\)\s+\(pin\s+{_QUOTED_VALUE}\)",
-    re.MULTILINE,
-)
+_REF_PATTERN = re.compile(rf"\(ref\s+{_QUOTED_VALUE}\)", re.MULTILINE)
+_PIN_PATTERN = re.compile(rf"\(pin\s+{_QUOTED_VALUE}\)", re.MULTILINE)
 _NAME_PATTERN = re.compile(rf"\(name\s+{_QUOTED_VALUE}\)", re.MULTILINE)
 _GENERATED_NET_NAME = re.compile(r"^(?:Net|unconnected)-\(.+\)$", re.IGNORECASE)
 
@@ -40,6 +38,34 @@ def _pin(reference: object, pin: object) -> ConnectivityPin:
     if not ref or not number:
         raise ValueError("Connectivity pin records require non-empty reference and pin values")
     return ref, number
+
+
+def _native_node_pins(block: str) -> tuple[ConnectivityPin, ...]:
+    pins: list[ConnectivityPin] = []
+    cursor = 0
+    while cursor < len(block):
+        start = block.find("(node", cursor)
+        if start < 0:
+            break
+        token_end = start + len("(node")
+        if token_end < len(block) and not block[token_end].isspace():
+            cursor = token_end
+            continue
+        node_block, length = _extract_block(block, start)
+        if not node_block or length <= 0:
+            raise ValueError("Malformed native KiCad netlist: unbalanced node block")
+        references = _REF_PATTERN.findall(node_block)
+        pin_numbers = _PIN_PATTERN.findall(node_block)
+        if len(references) != 1 or len(pin_numbers) != 1:
+            raise ValueError("Native connectivity node requires exactly one ref and pin")
+        pins.append(
+            _pin(
+                _unescape_sexpr_string(references[0]),
+                _unescape_sexpr_string(pin_numbers[0]),
+            )
+        )
+        cursor = start + length
+    return tuple(pins)
 
 
 def _canonical_native_name(raw: str) -> str | None:
@@ -110,13 +136,7 @@ def normalize_native_connectivity(netlist_text: str) -> ConnectivitySignature:
         if name_match is None:
             raise ValueError("Native connectivity net is missing a name")
         name = _canonical_native_name(_unescape_sexpr_string(name_match.group(1)))
-        pins = tuple(
-            _pin(
-                _unescape_sexpr_string(match.group(1)),
-                _unescape_sexpr_string(match.group(2)),
-            )
-            for match in _NODE_PATTERN.finditer(block)
-        )
+        pins = _native_node_pins(block)
         if pins:
             groups.append((name, pins))
         cursor = start + length

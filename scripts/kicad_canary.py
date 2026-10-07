@@ -31,6 +31,8 @@ KICAD_VIOLATION_EXIT_CODE = 5
 WINDOWS_PRIMARY_RUNNER = "windows-2025-vs2026"
 WINDOWS_PRIMARY_KICAD_VERSION = "10.0.6"
 
+GIT_EXECUTABLE = shutil.which("git")
+
 INSTALLERS = {
     "10.0.x": {
         "release_ppa": "ppa:kicad/kicad-10.0-releases",
@@ -918,8 +920,10 @@ def _source_sha() -> str:
         candidate = os.environ.get(env_name, "").strip().lower()
         if re.fullmatch(r"[0-9a-f]{40,64}", candidate):
             return candidate
+    if GIT_EXECUTABLE is None:
+        raise RuntimeError("Differential canary evidence requires a resolved git executable")
     status = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=no"],
+        [GIT_EXECUTABLE, "status", "--porcelain", "--untracked-files=no"],
         cwd=REPO_ROOT,
         text=True,
         capture_output=True,
@@ -929,7 +933,7 @@ def _source_sha() -> str:
     if status.returncode != 0 or status.stdout.strip():
         raise RuntimeError("Differential canary evidence requires a clean tracked source tree")
     result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
+        [GIT_EXECUTABLE, "rev-parse", "HEAD"],
         cwd=REPO_ROOT,
         text=True,
         capture_output=True,
@@ -968,6 +972,17 @@ def _differential_lane(compatibility: dict[str, Any], kicad_range: str) -> str:
     return "stable"
 
 
+def _safe_differential_exception_reason(prefix: str, exc: Exception) -> str:
+    from kicad_mcp.evals.evidence_sanitization import validate_sanitized_evidence
+
+    detail = f"{type(exc).__name__}: {exc}"
+    try:
+        validate_sanitized_evidence(detail)
+    except ValueError:
+        detail = type(exc).__name__
+    return f"{prefix}: {detail}."
+
+
 def _custom_connectivity_groups(schematic: Path) -> list[dict[str, Any]]:
     from kicad_mcp.tools.schematic import build_connectivity_groups
 
@@ -1003,14 +1018,8 @@ def _run_connectivity_differential(
         fixture_file_hash,
     )
 
-    schematic = _fixture_file(artifacts / "workspace", fixture, ".kicad_sch")
-    source_sha = _source_sha()
-    kicad_version = _kicad_version_from_result(version_result)
-    fixture_hash = fixture_file_hash(schematic)
-    try:
-        custom_groups = _custom_connectivity_groups(schematic)
-    except (OSError, UnicodeError, ValueError, TypeError) as exc:
-        result = classify_connectivity_differential(
+    def infrastructure_invalid(exc: Exception):
+        return classify_connectivity_differential(
             source_sha=source_sha,
             lane=_differential_lane(compatibility, kicad_range),
             kicad_version=kicad_version,
@@ -1019,8 +1028,17 @@ def _run_connectivity_differential(
             native_netlist_text=None,
             custom_groups=None,
             infrastructure_valid=False,
-            reason=f"Connectivity differential failed: {type(exc).__name__}.",
+            reason=_safe_differential_exception_reason("Connectivity differential failed", exc),
         )
+
+    schematic = _fixture_file(artifacts / "workspace", fixture, ".kicad_sch")
+    source_sha = _source_sha()
+    kicad_version = _kicad_version_from_result(version_result)
+    fixture_hash = fixture_file_hash(schematic)
+    try:
+        custom_groups = _custom_connectivity_groups(schematic)
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        result = infrastructure_invalid(exc)
     else:
         native_path = artifacts / "reports" / "connectivity-native.net"
         if not bool(native_step.get("ok")):
@@ -1048,17 +1066,7 @@ def _run_connectivity_differential(
                     custom_groups=custom_groups,
                 )
             except (OSError, UnicodeError, ValueError, TypeError) as exc:
-                result = classify_connectivity_differential(
-                    source_sha=source_sha,
-                    lane=_differential_lane(compatibility, kicad_range),
-                    kicad_version=kicad_version,
-                    fixture_id=fixture,
-                    fixture_hash=fixture_hash,
-                    native_netlist_text=None,
-                    custom_groups=None,
-                    infrastructure_valid=False,
-                    reason=f"Connectivity differential failed: {type(exc).__name__}.",
-                )
+                result = infrastructure_invalid(exc)
 
     report = aggregate_differential_results([result])
     _write_text(output, render_differential_report_json(report))
@@ -1069,6 +1077,7 @@ def _run_connectivity_differential(
         "status": result.status,
         "outputs": [str(output.relative_to(artifacts))],
     }
+
 
 def _version_range_error(version_result: dict[str, object], kicad_range: str) -> str | None:
     stdout_path = Path(str(version_result["stdout"]))

@@ -662,6 +662,7 @@ def test_connectivity_differential_parser_failure_is_infrastructure_invalid(
         )
     )
     assert report["infrastructure_invalid_count"] == 1
+    assert "parse failed" in report["results"][0]["reason"]
 
 
 def test_connectivity_differential_report_keeps_preview_lane_attribution(
@@ -712,18 +713,29 @@ def test_differential_source_sha_prefers_explicit_head_sha(monkeypatch) -> None:
 
 def test_differential_source_sha_rejects_dirty_tracked_source_tree(monkeypatch) -> None:
     calls: list[tuple[str, ...]] = []
+    resolved_git = "/usr/bin/git"
 
     def run(args: list[str], **kwargs: object):
         calls.append(tuple(args))
-        if args[:2] == ["git", "status"]:
+        if args[1:3] == ["status", "--porcelain"]:
             return subprocess.CompletedProcess(
                 args, 0, stdout=" M scripts/kicad_canary.py\n", stderr=""
             )
         return subprocess.CompletedProcess(args, 0, stdout="a" * 40 + "\n", stderr="")
 
     monkeypatch.delenv("GITHUB_SHA", raising=False)
+    monkeypatch.setattr(kicad_canary, "GIT_EXECUTABLE", resolved_git)
     monkeypatch.setattr(kicad_canary.subprocess, "run", run)
 
     with pytest.raises(RuntimeError, match="clean tracked source tree"):
         kicad_canary._source_sha()
-    assert calls == [("git", "status", "--porcelain", "--untracked-files=no")]
+    assert calls == [(resolved_git, "status", "--porcelain", "--untracked-files=no")]
+
+
+def test_differential_source_sha_fails_closed_without_resolved_git(monkeypatch) -> None:
+    monkeypatch.delenv("KICAD_DIFFERENTIAL_SOURCE_SHA", raising=False)
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+    monkeypatch.setattr(kicad_canary, "GIT_EXECUTABLE", None)
+
+    with pytest.raises(RuntimeError, match="resolved git executable"):
+        kicad_canary._source_sha()
