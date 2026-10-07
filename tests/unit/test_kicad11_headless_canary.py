@@ -37,6 +37,7 @@ def _install_fake_kipy(monkeypatch) -> None:
     class FakeBoard:
         def __init__(self, file_path: str) -> None:
             self.name = Path(file_path).name
+            self._file_path = file_path
             self._project_path = str(Path(file_path).with_suffix(".kicad_pro"))
 
         def get_project(self) -> object:
@@ -47,6 +48,32 @@ def _install_fake_kipy(monkeypatch) -> None:
 
         def drop_commit(self) -> None:
             return None
+
+        def save_as(
+            self,
+            filename: str,
+            overwrite: bool = False,
+            include_project: bool = True,
+        ) -> None:
+            _ = (overwrite, include_project)
+            Path(filename).write_text(
+                Path(self._file_path).read_text(encoding="utf-8"), encoding="utf-8"
+            )
+
+        def get_footprints(self) -> list[object]:
+            return []
+
+        def get_tracks(self) -> list[object]:
+            return []
+
+        def get_vias(self) -> list[object]:
+            return []
+
+        def get_zones(self) -> list[object]:
+            return []
+
+        def get_nets(self) -> list[object]:
+            return []
 
     class FakeKiCad:
         def __init__(
@@ -206,9 +233,15 @@ def test_canary_appends_live_object_identity_to_preview_differential_report(
     assert identity["status"] == "match"
     assert identity["lane"] == "preview"
     assert identity["operation"] == "live-object.board-identity"
-    assert summary["results_total"] == 1
-    assert summary["match_count"] == 1
-    assert summary["results"][0] == identity
+    assert summary["results_total"] == 2
+    assert summary["match_count"] == 2
+    assert identity in summary["results"]
+    roundtrip = json.loads(
+        (artifacts / "differential" / "roundtrip-reopen.json").read_text(encoding="utf-8")
+    )
+    assert roundtrip["status"] == "match"
+    assert roundtrip["operation"] == "file-roundtrip.board-save-reopen"
+    assert roundtrip in summary["results"]
     assert str(tmp_path) not in json.dumps(identity)
 
 
@@ -257,6 +290,13 @@ def test_canary_marks_live_identity_unavailable_when_headless_authority_is_absen
     assert identity.get("native_result_hash") is None
     assert identity.get("custom_result_hash") is None
     assert "KiCad 11+ headless IPC is not ready" in identity["reason"]
+    roundtrip = json.loads(
+        (artifacts / "differential" / "roundtrip-reopen.json").read_text(encoding="utf-8")
+    )
+    assert roundtrip["status"] == "unavailable-authority"
+    assert roundtrip["lane"] == "preview"
+    assert roundtrip.get("native_result_hash") is None
+    assert "KiCad 11+ headless IPC is not ready" in roundtrip["reason"]
 
 
 def test_canary_appends_live_identity_to_existing_preview_differential_summary(
@@ -309,9 +349,10 @@ def test_canary_appends_live_identity_to_existing_preview_differential_summary(
     )
 
     summary = json.loads((differential / "summary.json").read_text(encoding="utf-8"))
-    assert summary["results_total"] == 2
-    assert summary["match_count"] == 2
+    assert summary["results_total"] == 3
+    assert summary["match_count"] == 3
     assert [record["operation"] for record in summary["results"]] == [
         "drc.findings-and-severities",
         "live-object.board-identity",
+        "file-roundtrip.board-save-reopen",
     ]
