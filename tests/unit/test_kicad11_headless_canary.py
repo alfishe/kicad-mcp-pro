@@ -132,6 +132,10 @@ def test_canary_reports_read_write_and_export_separately(
         assert payload["status"] == "passed"
         assert payload["kicadVersion"] == "11.0.0"
 
+    assert (
+        artifacts / "differential" / "native-roundtrip-demo.kicad_pcb"
+    ).is_file()
+
 
 def test_canary_writes_blocked_reports_when_nightly_is_unavailable(tmp_path: Path) -> None:
     artifacts = tmp_path / "artifacts"
@@ -201,6 +205,74 @@ def test_canary_rejects_non_kicad_input_before_runner(monkeypatch, tmp_path: Pat
         )
 
     assert calls == []
+
+
+def test_custom_roundtrip_snapshot_fails_closed_on_invalid_utf8(tmp_path: Path) -> None:
+    board = tmp_path / "malformed.kicad_pcb"
+    board.write_bytes(b"(kicad_pcb)\xff")
+
+    with pytest.raises(UnicodeDecodeError):
+        kicad11_headless_canary._custom_roundtrip_snapshot(board)
+
+
+def test_headless_roundtrip_probe_closes_clients_when_reopen_fails(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    closed: list[str] = []
+
+    class FakeBoard:
+        def __init__(self, file_path: str) -> None:
+            self._file_path = file_path
+
+        def save_as(
+            self,
+            filename: str,
+            overwrite: bool = False,
+            include_project: bool = True,
+        ) -> None:
+            _ = (overwrite, include_project)
+            Path(filename).write_text("(kicad_pcb)\n", encoding="utf-8")
+
+    class FakeKiCad:
+        def __init__(
+            self,
+            *,
+            headless: bool,
+            timeout_ms: int,
+            kicad_cli_path: str,
+            file_path: str,
+        ) -> None:
+            assert headless is True
+            assert timeout_ms > 0
+            assert kicad_cli_path
+            self._file_path = file_path
+
+        def get_board(self) -> FakeBoard:
+            if Path(self._file_path).name.startswith("native-roundtrip-"):
+                raise RuntimeError("reopen failed")
+            return FakeBoard(self._file_path)
+
+        def close(self) -> None:
+            closed.append(Path(self._file_path).name)
+
+    module = ModuleType("kipy")
+    module.KiCad = FakeKiCad  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "kipy", module)
+
+    board = tmp_path / "demo.kicad_pcb"
+    board.write_text("(kicad_pcb)\n", encoding="utf-8")
+    artifacts = tmp_path / "artifacts"
+
+    probe, reason = kicad11_headless_canary._headless_roundtrip_probe(
+        cli=tmp_path / "kicad-cli",
+        project_or_file=board,
+        artifacts=artifacts,
+    )
+
+    assert probe is None
+    assert reason == "Native round-trip probe failed: RuntimeError: reopen failed"
+    assert closed == ["demo.kicad_pcb", "native-roundtrip-demo.kicad_pcb"]
 
 
 def test_canary_appends_live_object_identity_to_preview_differential_report(
