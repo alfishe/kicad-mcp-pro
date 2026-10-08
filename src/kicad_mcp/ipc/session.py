@@ -177,7 +177,7 @@ class HeadlessServerSession:
             raise KiCadIpcUnavailableError(f"session {self._name!r} is not running")
 
         last_error: Exception | None = None
-        for attempt in range(max(1, retries)):
+        for _ in range(max(1, retries)):
             try:
                 return self._health_prober(self._socket_path)
             except KiCadIpcUnavailableError as exc:
@@ -232,7 +232,8 @@ class HeadlessServerSession:
             self._line_queue.put(stripped)
 
     def _wait_ready(self) -> None:
-        assert self._proc is not None and self._socket_path is not None
+        if self._proc is None or self._socket_path is None:
+            raise RuntimeError("_wait_ready called before the process was spawned")
         deadline = time.monotonic() + self._config.ready_timeout
 
         while time.monotonic() < deadline:

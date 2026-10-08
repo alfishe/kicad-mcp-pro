@@ -16,9 +16,10 @@ import os
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 _LOG_LOCK = threading.Lock()
 _MAX_MEMORY_RECORDS = 500
@@ -36,7 +37,7 @@ def _audit_disabled() -> bool:
 
 
 def _utc_now_iso() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="milliseconds")
+    return _dt.datetime.now(_dt.UTC).isoformat(timespec="milliseconds")
 
 
 @dataclass(frozen=True, slots=True)

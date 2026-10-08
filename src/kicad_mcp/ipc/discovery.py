@@ -56,7 +56,10 @@ def _default_config() -> IpcDiscoveryConfig:
 def _socket_search_dirs() -> list[Path]:
     # KiCad (common/api/api_server.cpp, StandardSocketPath) uses /tmp/kicad on macOS
     # and $TMPDIR/kicad elsewhere; probe both so a socket is found regardless of platform.
-    dirs = [Path("/tmp") / "kicad", Path(tempfile.gettempdir()) / "kicad"]
+    dirs = [
+        Path("/tmp") / "kicad",  # noqa: S108 - KiCad's hardcoded macOS socket dir
+        Path(tempfile.gettempdir()) / "kicad",
+    ]
     unique: list[Path] = []
     for directory in dirs:
         if directory not in unique:
@@ -90,7 +93,9 @@ def discover_socket_candidates(
             candidates.append(canonical)
             seen.add(canonical)
 
-        pid_sockets = [path for path in base.glob("api-*.sock") if path.exists() and path not in seen]
+        pid_sockets = [
+            path for path in base.glob("api-*.sock") if path.exists() and path not in seen
+        ]
         pid_sockets.sort(key=lambda path: path.stat().st_mtime, reverse=True)
         candidates.extend(pid_sockets)
         seen.update(pid_sockets)

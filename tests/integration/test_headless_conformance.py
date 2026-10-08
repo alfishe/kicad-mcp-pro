@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -23,7 +24,6 @@ from kicad_mcp.config import get_config
 from kicad_mcp.discovery import discover_kicad_cli
 from kicad_mcp.ipc import SessionConfig, get_session_manager
 from kicad_mcp.validation.verify_board import compose_board_verdict, summarize_check
-from kicad_mcp.tools.export_support import _run_cli
 
 pytestmark = [pytest.mark.slow]
 
@@ -49,14 +49,14 @@ def _real_cli() -> Path:
 
 
 @pytest.fixture()
-def headless_session():
+def headless_session() -> Iterator[object]:
     cli = _real_cli()
     manager = get_session_manager()
     session = manager.start(
         "conformance",
         config=SessionConfig(
             kicad_cli=cli,
-            socket_path=Path("/tmp/kicad/api-conformance.sock"),
+            socket_path=Path("/tmp/kicad/api-conformance.sock"),  # noqa: S108 - session-scoped
             preload=FIXTURE_DIR / "multi-sheet-schematic.kicad_pcb",
         ),
     )

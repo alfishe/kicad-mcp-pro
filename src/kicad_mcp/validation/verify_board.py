@@ -103,8 +103,8 @@ def compose_board_verdict(checks: list[VerifyCheck]) -> dict[str, object]:
     else:
         overall = "PASS"
 
-    failed = [check.name for check, v in zip(checks, verdicts) if v == "FAIL"]
-    warned = [check.name for check, v in zip(checks, verdicts) if v == "WARN"]
+    failed = [check.name for check, v in zip(checks, verdicts, strict=True) if v == "FAIL"]
+    warned = [check.name for check, v in zip(checks, verdicts, strict=True) if v == "WARN"]
 
     if overall == "PASS":
         summary = "All verification checks passed."

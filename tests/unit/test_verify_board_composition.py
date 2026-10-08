@@ -19,7 +19,9 @@ def _report(*severities: str) -> dict[str, object]:
 
 
 def test_clean_report_is_pass() -> None:
-    check = summarize_check("pcb_drc", status="clean", report=_report(), unconnected_key="unconnected_items")
+    check = summarize_check(
+        "pcb_drc", status="clean", report=_report(), unconnected_key="unconnected_items"
+    )
 
     assert check.verdict() == "PASS"
     assert check.errors == 0

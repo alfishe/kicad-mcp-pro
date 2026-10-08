@@ -68,6 +68,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from typer.models import OptionInfo
 
 from . import __version__
+from .audit import wrap_tool_audit
 from .capabilities import AccessTier, RuntimeRequirement, all_protocol_metadata
 from .capabilities import get as get_capability_record
 from .compatibility import MCP_PROTOCOL_VERSION
@@ -96,7 +97,6 @@ from .operating_modes import (
     filter_tools_for_mode,
     is_tool_allowed_in_mode,
 )
-from .audit import wrap_tool_audit
 from .tools import footprint as _footprint
 from .tools import jobset as _jobset
 from .tools import router
